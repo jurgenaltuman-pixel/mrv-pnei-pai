@@ -99,7 +99,10 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: bash scripts/ci-android-signing.sh
+        run: |
+          sed -i 's/\r$//' scripts/ci-android-signing.sh 2>/dev/null || true
+          chmod +x scripts/ci-android-signing.sh
+          bash scripts/ci-android-signing.sh
 
       - name: Build Release APK and AAB
         working-directory: android

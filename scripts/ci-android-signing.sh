@@ -10,19 +10,11 @@ PROPS_FILE="$ANDROID_DIR/keystore.properties"
 
 mkdir -p "$(dirname "$KEYSTORE_FILE")"
 
-if [[ -n "${ANDROID_KEYSTORE_BASE64:-}" ]]; then
-  echo "Using Play Store keystore from GitHub Secrets..."
-  echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_FILE"
-  cat > "$PROPS_FILE" <<EOF
-storeFile=${KEYSTORE_PATH}
-storePassword=${ANDROID_KEYSTORE_PASSWORD}
-keyAlias=${ANDROID_KEY_ALIAS}
-keyPassword=${ANDROID_KEY_PASSWORD}
-EOF
-else
-  echo "No ANDROID_KEYSTORE_BASE64 — generating CI test keystore (sideload / QA, not Play Store)."
+write_ci_keystore() {
+  echo "Using CI test keystore (sideload / QA, not Play Store)."
   STORE_PASS="${ANDROID_CI_KEYSTORE_PASSWORD:-mrv-ci-store-2026}"
   KEY_PASS="${ANDROID_CI_KEY_PASSWORD:-mrv-ci-key-2026}"
+  rm -f "$KEYSTORE_FILE"
   keytool -genkeypair -v \
     -keystore "$KEYSTORE_FILE" \
     -alias mrv2026 \
@@ -36,6 +28,25 @@ storePassword=${STORE_PASS}
 keyAlias=mrv2026
 keyPassword=${KEY_PASS}
 EOF
+}
+
+if [[ -n "${ANDROID_KEYSTORE_BASE64:-}" ]] \
+  && [[ -n "${ANDROID_KEYSTORE_PASSWORD:-}" ]] \
+  && [[ -n "${ANDROID_KEY_ALIAS:-}" ]] \
+  && [[ -n "${ANDROID_KEY_PASSWORD:-}" ]]; then
+  echo "Trying Play Store keystore from GitHub Secrets..."
+  if echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_FILE" 2>/dev/null && [[ -s "$KEYSTORE_FILE" ]]; then
+    cat > "$PROPS_FILE" <<EOF
+storeFile=${KEYSTORE_PATH}
+storePassword=${ANDROID_KEYSTORE_PASSWORD}
+keyAlias=${ANDROID_KEY_ALIAS}
+keyPassword=${ANDROID_KEY_PASSWORD}
+EOF
+    echo "Android signing configured (release keystore from secrets)."
+    exit 0
+  fi
+  echo "::warning::ANDROID_KEYSTORE_BASE64 invalid — falling back to CI test keystore."
 fi
 
+write_ci_keystore
 echo "Android signing configured at $PROPS_FILE"
