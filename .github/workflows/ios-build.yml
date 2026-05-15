@@ -10,6 +10,9 @@ concurrency:
   group: ios-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build-ios:
     runs-on: macos-latest
@@ -20,8 +23,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
+          cache-dependency-path: package-lock.json
 
       - run: npm ci
 
@@ -32,7 +36,9 @@ jobs:
         run: npm run build
 
       - name: Capacitor sync iOS
-        run: npx cap sync ios
+        run: |
+          chmod +x scripts/ci-cap-sync.sh
+          bash scripts/ci-cap-sync.sh ios
 
       - name: Build for iOS Simulator (sin firma Apple)
         working-directory: ios/App
@@ -41,7 +47,7 @@ jobs:
             -scheme App \
             -configuration Debug \
             -sdk iphonesimulator \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath build \
             build \
             CODE_SIGNING_ALLOWED=NO

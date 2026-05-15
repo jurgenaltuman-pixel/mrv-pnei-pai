@@ -46,7 +46,6 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
-          cache: false
 
       - name: Setup Android SDK
         run: |
@@ -92,12 +91,9 @@ jobs:
       - name: Capacitor sync Android
         run: |
           set -euxo pipefail
-          sed -i 's/\r$//' android/gradlew scripts/ci-android-signing.sh 2>/dev/null || true
-          chmod +x android/gradlew scripts/ci-android-signing.sh
-          if [ -f capacitor.config.ts ]; then mv capacitor.config.ts _capacitor.config.ts.bak; fi
-          npx cap copy android
-          npx cap update android
-          if [ -f _capacitor.config.ts.bak ]; then mv _capacitor.config.ts.bak capacitor.config.ts; fi
+          sed -i 's/\r$//' android/gradlew scripts/ci-android-signing.sh scripts/ci-cap-sync.sh 2>/dev/null || true
+          chmod +x android/gradlew scripts/ci-android-signing.sh scripts/ci-cap-sync.sh
+          bash scripts/ci-cap-sync.sh android
 
       - name: Configure Android signing
         env:
