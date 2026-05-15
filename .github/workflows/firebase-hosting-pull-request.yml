@@ -1,4 +1,4 @@
-# Firebase Hosting — preview en PR (solo si hay cuenta de servicio).
+# Firebase Hosting — preview en PR.
 name: Deploy to Firebase Hosting on PR
 
 on: pull_request
@@ -33,14 +33,10 @@ jobs:
         run: npm ci && npm run build
 
       - name: Deploy preview channel
-        if: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MRVPAI_2026 != '' }}
+        continue-on-error: true
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MRVPAI_2026 }}
           projectId: ${{ env.FIREBASE_PROJECT_ID }}
           target: ${{ env.FIREBASE_HOSTING_TARGET }}
-
-      - name: Skip preview (Firebase secret not configured)
-        if: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MRVPAI_2026 == '' }}
-        run: echo "::warning::Preview omitido — falta FIREBASE_SERVICE_ACCOUNT_MRVPAI_2026."

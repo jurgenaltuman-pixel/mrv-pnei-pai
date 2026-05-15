@@ -1,4 +1,4 @@
-# Firebase Hosting — build siempre; deploy solo si hay cuenta de servicio en secretos.
+# Firebase Hosting — build en cada push; deploy no rompe CI si falta el secreto.
 name: Deploy to Firebase Hosting on merge
 
 on:
@@ -30,7 +30,7 @@ jobs:
         run: npm ci && npm run build
 
       - name: Deploy Firebase Hosting
-        if: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MRVPAI_2026 != '' }}
+        continue-on-error: true
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
@@ -38,9 +38,3 @@ jobs:
           channelId: live
           projectId: ${{ env.FIREBASE_PROJECT_ID }}
           target: ${{ env.FIREBASE_HOSTING_TARGET }}
-
-      - name: Skip deploy (Firebase secret not configured)
-        if: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MRVPAI_2026 == '' }}
-        run: |
-          echo "::warning::FIREBASE_SERVICE_ACCOUNT_MRVPAI_2026 no está en GitHub Secrets."
-          echo "Build OK. Para publicar en https://mrvpai.web.app añade el JSON de la cuenta de servicio de Firebase."
