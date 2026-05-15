@@ -452,6 +452,15 @@ export default function LoginPage() {
           </button>
 
         </form>
+
+        {import.meta.env.VITE_BUILD_ID && (
+          <p
+            className="text-center text-[10px] text-white/55 font-mono mt-3 tracking-tight px-2"
+            title="Si este código no coincide con el último commit en GitHub, el deploy de Firebase no se actualizó."
+          >
+            Web publicada · commit {import.meta.env.VITE_BUILD_ID.slice(0, 7)}
+          </p>
+        )}
       </div>
     </div>
   );

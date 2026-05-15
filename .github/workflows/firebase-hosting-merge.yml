@@ -1,10 +1,11 @@
-# Firebase Hosting — build en cada push; deploy no rompe CI si falta el secreto.
+# Firebase Hosting — build + deploy en cada push a main (o manual).
 name: Deploy to Firebase Hosting on merge
 
 on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -40,6 +41,7 @@ jobs:
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          VITE_BUILD_ID: ${{ github.sha }}
         run: npm ci && npm run build
 
       - name: Deploy Firebase Hosting
