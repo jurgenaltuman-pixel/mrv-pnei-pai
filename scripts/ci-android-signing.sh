@@ -30,6 +30,14 @@ keyPassword=${KEY_PASS}
 EOF
 }
 
+# En GitHub Actions: keystore de prueba (evita secretos rotos). Para Play Store en CI:
+# Settings → Variables → USE_PLAY_KEYSTORE_IN_CI=true
+if [[ -n "${GITHUB_ACTIONS:-}" ]] && [[ "${USE_PLAY_KEYSTORE_IN_CI:-}" != "true" ]]; then
+  write_ci_keystore
+  echo "Android signing configured at $PROPS_FILE"
+  exit 0
+fi
+
 if [[ -n "${ANDROID_KEYSTORE_BASE64:-}" ]] \
   && [[ -n "${ANDROID_KEYSTORE_PASSWORD:-}" ]] \
   && [[ -n "${ANDROID_KEY_ALIAS:-}" ]] \

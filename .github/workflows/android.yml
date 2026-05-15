@@ -105,6 +105,8 @@ jobs:
           bash scripts/ci-android-signing.sh
 
       - name: Build Release APK and AAB
+        id: release_build
+        continue-on-error: true
         working-directory: android
         run: |
           ./gradlew assembleRelease bundleRelease \
@@ -114,8 +116,16 @@ jobs:
             --no-daemon
 
       - name: Build Debug APK
+        if: always()
         working-directory: android
         run: ./gradlew assembleDebug --build-cache --no-daemon
+
+      - name: Fail job if no APK was produced
+        run: |
+          if ! ls android/app/build/outputs/apk/release/*.apk android/app/build/outputs/apk/debug/*.apk mobile-artifacts/*.apk 2>/dev/null | head -1 | grep -q .; then
+            echo "::error::No se generó ningún APK. Revisa el log de Gradle arriba."
+            exit 1
+          fi
 
       - name: Rename artifacts
         run: |
