@@ -2,25 +2,15 @@
 
 declare const self: ServiceWorkerGlobalScope;
 
-/** Nueva versión = borra cachés viejas y evita index.html obsoleto (pantalla en blanco tras deploy). */
-const CACHE_NAME = 'mrv-v4-static';
-const RUNTIME_CACHE = 'mrv-v4-runtime';
+/** Bump para forzar activate y limpiar lógica vieja (clone roto). */
+const CACHE_NAME = 'mrv-v8-static';
 
-/** Solo assets con nombre estable; NUNCA precargar / ni index.html (rompen tras cada build de Vite). */
-const URLS_TO_CACHE = ['/manifest.json', '/robots.txt', '/icon-192.png', '/icon-512.png', '/favicon.png'];
+const URLS_TO_CACHE = ['/manifest.json', '/robots.txt', '/logo-mrv.png', '/icon-192.png', '/icon-512.png', '/favicon.png'];
 
 const PRIVATE_PATHS = ['/auth/', '/profiles/', '/user_roles/', '/admin/', '/registros_vacunacion'];
 
 function isPrivateRequest(url: URL): boolean {
   return PRIVATE_PATHS.some((path) => url.pathname.includes(path));
-}
-
-function shouldCacheResponse(request: Request, response: Response): boolean {
-  if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(request.method)) return false;
-  if (response.status !== 200) return false;
-  const url = new URL(request.url);
-  if (isPrivateRequest(url)) return false;
-  return true;
 }
 
 self.addEventListener('install', (event: ExtendableEvent) => {
@@ -35,16 +25,20 @@ self.addEventListener('activate', (event: ExtendableEvent) => {
     caches.keys().then((cacheNames) =>
       Promise.all(
         cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME && cacheName !== RUNTIME_CACHE) {
+          if (cacheName !== CACHE_NAME) {
             return caches.delete(cacheName);
           }
         })
       )
-    )
+    ).then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
+/**
+ * SW mínima: sin cache.put(Response) ni .clone() en fetch — eso rompía con
+ * "Failed to execute 'clone' on 'Response': Response body is already used"
+ * y tiraba abajo React (chunks / vendor corruptos).
+ */
 self.addEventListener('fetch', (event: FetchEvent) => {
   const { request } = event;
   const url = new URL(request.url);
@@ -53,58 +47,30 @@ self.addEventListener('fetch', (event: FetchEvent) => {
     return;
   }
 
+  if (url.pathname.startsWith('/assets/')) {
+    event.respondWith(fetch(request));
+    return;
+  }
+
   if (isPrivateRequest(url)) {
     event.respondWith(fetch(request));
     return;
   }
 
-  // Navegación: red primero (evita index obsoleto → JS 404 → pantalla en blanco). Guardar copia para offline.
   if (request.mode === 'navigate' || request.destination === 'document') {
     event.respondWith(
-      fetch(request)
-        .then((response) => {
-          if (response && response.status === 200 && response.type === 'basic') {
-            caches.open(RUNTIME_CACHE).then((c) => c.put(request, response.clone()));
-          }
-          return response;
-        })
-        .catch(() =>
-          caches
-            .match(request)
-            .then((cached) => cached || caches.match('/index.html') || caches.match('/'))
-            .then((cached) => cached || new Response('Sin conexión', { status: 503 }))
-        )
-    );
-    return;
-  }
-
-  if (url.pathname.startsWith('/api') || url.hostname.includes('supabase')) {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          if (shouldCacheResponse(request, response)) {
-            caches.open(RUNTIME_CACHE).then((c) => c.put(request, response.clone()));
-          }
-          return response.clone();
-        })
-        .catch(() =>
-          caches.match(request).then((cached) => cached || new Response('No hay conexión', { status: 503 }))
-        )
-    );
-    return;
-  }
-
-  // JS/CSS/chunks: red primero (nuevos hashes tras deploy), caché solo como respaldo offline.
-  event.respondWith(
-    fetch(request)
-      .then((response) => {
-        if (response && response.status === 200 && shouldCacheResponse(request, response)) {
-          caches.open(RUNTIME_CACHE).then((c) => c.put(request, response.clone()));
-        }
-        return response;
+      fetch(request).catch(async () => {
+        const cached =
+          (await caches.match(request)) ||
+          (await caches.match('/index.html')) ||
+          (await caches.match('/'));
+        return cached ?? new Response('Sin conexión', { status: 503, statusText: 'Sin conexión' });
       })
-      .catch(() => caches.match(request).then((cached) => cached || fetch(request)))
-  );
+    );
+    return;
+  }
+
+  event.respondWith(fetch(request));
 });
 
 export {};

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { MrvAppLogo } from '@/components/branding/MrvAppLogo';
 import { useAuth } from '@/contexts/AuthContext';
 import { dataService } from '@/services/dataService';
 import { LogIn, UserPlus, Mail, Lock, User, Shield, Activity, AtSign, Search, AlertCircle, CheckCircle2, X, Eye, EyeOff } from 'lucide-react';
@@ -162,8 +163,8 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="relative inline-block mb-5">
-            <div className="w-24 h-24 rounded-2xl bg-white shadow-2xl flex items-center justify-center mx-auto ring-4 ring-white/20">
-              <img src="/icon-512.png" alt="Logo MRV" className="h-14 w-14 sm:h-16 sm:w-16 object-contain" />
+            <div className="w-24 h-24 rounded-2xl bg-white shadow-2xl flex items-center justify-center mx-auto ring-4 ring-white/20 p-1.5">
+              <MrvAppLogo className="h-full w-full object-contain rounded-xl" />
             </div>
             <div className="absolute -bottom-1.5 -right-1.5 w-7 h-7 rounded-full bg-white shadow-lg flex items-center justify-center">
               <Activity className="w-3.5 h-3.5 text-primary" />

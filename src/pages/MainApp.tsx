@@ -16,6 +16,7 @@ import { generarCodigoTemporalRve, validarFormatoCodigoTemporal } from '@/lib/te
 import { isFechaEnCampanaCvs } from '@/lib/mrv-constants';
 import type { FuenteVerificacion, AccionTomada } from '@/lib/mrv-constants';
 import { acumularJornada, getJornadaStats, type JornadaStats } from '@/lib/jornada-storage';
+import { MrvAppLogo } from '@/components/branding/MrvAppLogo';
 import { PageSkeleton, MapSkeleton } from '@/components/mrv/PageSkeleton';
 
 const DashboardView = lazy(() => import('@/components/mrv/DashboardView'));
@@ -608,7 +609,7 @@ export default function MainApp() {
     <div className="min-h-dvh bg-background pb-app">
       <header className="bg-primary text-primary-foreground px-3 sm:px-4 py-2.5 sm:py-3 flex items-center gap-2 sm:gap-3 sticky top-0 z-40 shadow-lg safe-area-top">
         <div className="h-10 w-10 rounded-xl bg-white/95 shadow-sm flex items-center justify-center flex-shrink-0">
-          <img src="/icon-192.png" alt="Logo" className="h-8 w-8 object-contain" />
+          <MrvAppLogo className="h-8 w-8 shrink-0" />
         </div>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-bold tracking-tight truncate">MRV — CVS Sarampión 2026</div>

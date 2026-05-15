@@ -6,7 +6,9 @@ import { componentTagger } from "lovable-tagger";
 // Plugin para ordenar los modulepreload en el HTML correcto
 function fixModulePreloadOrder() {
   const dependencyOrder = [
+    'vendor-react',
     'vendor',
+    'vendor-supabase',
     'vendor-charts',
     'vendor-maps',
     'components',
@@ -112,11 +114,19 @@ export default defineConfig(({ mode }) => ({
         },
         manualChunks(id) {
           if (!id.includes('node_modules')) return;
+          // React + ReactDOM + scheduler + router DEBEN ir juntos (un solo React).
+          if (
+            id.includes('node_modules/react-dom') ||
+            id.includes('node_modules/react/') ||
+            id.includes('node_modules/scheduler/') ||
+            id.includes('node_modules/react-router')
+          ) {
+            return 'vendor-react';
+          }
           if (id.includes('chart.js') || id.includes('react-chartjs')) return 'vendor-charts';
           if (id.includes('leaflet') || id.includes('react-leaflet')) return 'vendor-maps';
           if (id.includes('xlsx')) return 'vendor-xlsx';
           if (id.includes('@supabase')) return 'vendor-supabase';
-          if (id.includes('react-dom') || id.includes('react-router')) return 'vendor-react';
           return 'vendor';
         },
       },
