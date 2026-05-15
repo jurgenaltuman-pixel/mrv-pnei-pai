@@ -114,17 +114,21 @@ export default defineConfig(({ mode }) => ({
         },
         manualChunks(id) {
           if (!id.includes('node_modules')) return;
-          // React + ReactDOM + scheduler + router DEBEN ir juntos (un solo React).
+          // Todo lo que importa React debe compartir el mismo chunk que react (evita createContext undefined).
           if (
             id.includes('node_modules/react-dom') ||
             id.includes('node_modules/react/') ||
             id.includes('node_modules/scheduler/') ||
-            id.includes('node_modules/react-router')
+            id.includes('node_modules/react-router') ||
+            id.includes('node_modules/react-leaflet') ||
+            id.includes('node_modules/@react-leaflet/') ||
+            id.includes('node_modules/react-chartjs-2')
           ) {
             return 'vendor-react';
           }
-          if (id.includes('chart.js') || id.includes('react-chartjs')) return 'vendor-charts';
-          if (id.includes('leaflet') || id.includes('react-leaflet')) return 'vendor-maps';
+          if (id.includes('chart.js')) return 'vendor-charts';
+          // Leaflet puro (sin react-leaflet); path acotado para no coger @types/leaflet
+          if (id.includes('node_modules/leaflet/')) return 'vendor-maps';
           if (id.includes('xlsx')) return 'vendor-xlsx';
           if (id.includes('@supabase')) return 'vendor-supabase';
           return 'vendor';
