@@ -11,7 +11,7 @@ interface UserSuggestion {
 }
 
 export default function LoginPage() {
-  const { login, signup } = useAuth();
+  const { login, signup, signOutNotice, dismissSignOutNotice } = useAuth();
   const [isSignup, setIsSignup] = useState(false);
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
@@ -200,6 +200,24 @@ export default function LoginPage() {
               <UserPlus className="w-4 h-4 shrink-0" /> Registro
             </button>
           </div>
+
+          {signOutNotice && (
+            <div
+              role="status"
+              className="rounded-xl border border-amber-400/80 bg-amber-50 text-amber-950 p-3 text-sm flex gap-2 items-start"
+            >
+              <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" aria-hidden />
+              <p className="flex-1 leading-snug">{signOutNotice}</p>
+              <button
+                type="button"
+                onClick={() => dismissSignOutNotice()}
+                className="shrink-0 text-amber-900/70 hover:text-amber-950 font-bold px-1"
+                aria-label="Cerrar aviso"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          )}
 
           {isSignup && (
             <>

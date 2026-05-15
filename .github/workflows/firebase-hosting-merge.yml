@@ -23,6 +23,19 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
+      - name: Verify deploy secrets
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MRVPAI_2026 }}
+        run: |
+          set -euo pipefail
+          missing() { echo "::error::$1"; exit 1; }
+          [ -n "${VITE_SUPABASE_URL:-}" ] || missing "Falta el secreto VITE_SUPABASE_URL (Settings → Secrets). Sin él el build no apunta al proyecto Supabase correcto."
+          [ -n "${VITE_SUPABASE_PUBLISHABLE_KEY:-}" ] || missing "Falta VITE_SUPABASE_PUBLISHABLE_KEY (clave publicable/anon de Supabase)."
+          [ -n "${FIREBASE_SERVICE_ACCOUNT:-}" ] || missing "Falta FIREBASE_SERVICE_ACCOUNT_MRVPAI_2026 (JSON de cuenta de servicio). Sin él no se puede publicar en Hosting."
+          echo "OK: secretos presentes para build + deploy."
+
       - name: Build web
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
@@ -30,7 +43,6 @@ jobs:
         run: npm ci && npm run build
 
       - name: Deploy Firebase Hosting
-        continue-on-error: true
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}

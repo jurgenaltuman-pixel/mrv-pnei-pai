@@ -16,6 +16,9 @@ interface AuthContextType {
   inactive: boolean;
   mustChangePassword: boolean;
   authBlockMessage: string | null;
+  /** Motivo amigable tras cierre de sesión forzado (inactivo, sesión inválida, etc.) */
+  signOutNotice: string | null;
+  dismissSignOutNotice: () => void;
   login: (identifier: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   signup: (email: string, password: string, displayName: string, username: string) => Promise<{ ok: boolean; error?: string }>;
   changePassword: (newPassword: string) => Promise<{ ok: boolean; error?: string }>;
@@ -30,40 +33,61 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 function normalizeAuthError(message: string): string {
   const m = message.toLowerCase();
-  
-  // Log para debug (remover en producción si es necesario)
-  console.warn('🔴 Auth Error:', message);
-  
+  console.warn('Auth error (detalle técnico):', message);
+
   if (
     m.includes('invalid api key') ||
     m.includes('apikey is invalid') ||
     m.includes('missing apikey') ||
     m.includes('jwt malformed') ||
+    m.includes('invalid jwt') ||
     m.includes('project not found')
   ) {
-    return 'Error de configuración del sistema (Supabase API key/proyecto). Contacte al administrador.';
+    return 'La aplicación no está bien configurada con Supabase (clave o proyecto). Avisá al administrador del MRV; vos no podés corregirlo desde el teléfono.';
   }
-  
-  if (m.includes('failed to fetch') || m.includes('networkerror') || m.includes('connection refused')) {
-    return 'No se pudo conectar al servidor de autenticación. Verifique su conexión e intente nuevamente.';
+
+  if (m.includes('failed to fetch') || m.includes('networkerror') || m.includes('connection refused') || m.includes('load failed')) {
+    return 'No hay conexión a internet o el servidor no responde. Probá otra red, desactivá VPN y reintentá.';
   }
-  
-  if (m.includes('invalid login credentials')) return 'Credenciales inválidas. Verifique usuario/correo y contraseña.';
-  if (m.includes('user not found') || m.includes('no user found')) return 'Usuario o correo no encontrado.';
+
+  if (m.includes('invalid login credentials') || m.includes('invalid_credentials')) {
+    return 'Contraseña incorrecta o el correo no coincide. Si entrás con usuario (sin @), probá también con tu correo completo.';
+  }
+  if (m.includes('user not found') || m.includes('no user found')) {
+    return 'No existe una cuenta con ese correo. Verificá mayúsculas y que sea el mismo mail con el que se registró.';
+  }
   if (m.includes('email not confirmed') || m.includes('email_not_confirmed')) {
-    return 'Debe confirmar el correo antes de entrar. Revise su bandeja de entrada (y spam) o pida a un administrador que desactive la confirmación por email en Supabase.';
+    return 'Tenés que confirmar el correo antes de entrar. Revisá bandeja de entrada y spam, o pedí al admin que desactive la confirmación por email en Supabase.';
   }
-  if (m.includes('user already registered') || m.includes('already exists') || m.includes('duplicate')) return 'Este correo o usuario ya está registrado.';
-  if (m.includes('password')) return 'La contraseña no cumple los requisitos (mínimo 6 caracteres).';
-  if (m.includes('invalid email')) return 'El formato del correo electrónico no es válido.';
-  if (m.includes('weak password')) return 'La contraseña es muy débil. Use mayúsculas, minúsculas y números.';
-  if (m.includes('rate')) return 'Demasiados intentos. Espere unos minutos e intente nuevamente.';
-  if (m.includes('unauthorized') || m.includes('forbidden')) return 'No tiene permisos para realizar esta acción.';
+  if (m.includes('user already registered') || m.includes('already exists') || m.includes('duplicate')) {
+    return 'Ese correo o usuario ya está registrado. Usá «Iniciar sesión» o recuperá la cuenta con el administrador.';
+  }
+  if (m.includes('password') && (m.includes('short') || m.includes('least'))) {
+    return 'La contraseña debe tener al menos 6 caracteres.';
+  }
+  if (m.includes('invalid email')) {
+    return 'El formato del correo no es válido (ejemplo: nombre@correo.com).';
+  }
+  if (m.includes('weak password')) {
+    return 'La contraseña es muy débil. Usá letras y números.';
+  }
+  if (m.includes('rate') || m.includes('too many')) {
+    return 'Demasiados intentos. Esperá unos minutos y volvé a intentar.';
+  }
+  if (m.includes('unauthorized') || m.includes('forbidden') || m.includes('not authorized')) {
+    return 'No tenés permiso para esta operación. Si persiste, contactá soporte.';
+  }
+  if (m.includes('session') && (m.includes('expired') || m.includes('invalid'))) {
+    return 'La sesión venció o es inválida. Volvé a iniciar sesión.';
+  }
+  if (m.includes('refresh token') || m.includes('refresh_token')) {
+    return 'Sesión caducada. Cerrá la app por completo y entrá de nuevo con usuario o correo y contraseña.';
+  }
   if (m.includes('trigger') || m.includes('constraint')) {
-    return 'Error al crear el perfil de usuario. Contacte al administrador.';
+    return 'Error al guardar el perfil de usuario. Contactá al administrador.';
   }
-  
-  return 'Ocurrió un error de autenticación. Intente nuevamente. Si el problema persiste, contacte al soporte.';
+
+  return `No se pudo completar el acceso (${message.slice(0, 120)}${message.length > 120 ? '…' : ''}). Probá con correo en lugar de usuario o contactá soporte.`;
 }
 
 async function resolveDisplayName(supaUser: User): Promise<string> {
@@ -174,6 +198,26 @@ async function insertDefaultUserRole(userId: string) {
   }
 }
 
+function coerceRpcEmail(data: unknown): string | null {
+  if (typeof data === 'string') {
+    const t = data.trim().toLowerCase();
+    return t.includes('@') ? t : null;
+  }
+  if (Array.isArray(data) && data.length > 0) {
+    return coerceRpcEmail(data[0]);
+  }
+  return null;
+}
+
+function mapProfileLookupError(err: { message?: string; code?: string } | null): string | null {
+  if (!err?.message) return null;
+  const m = err.message.toLowerCase();
+  if (m.includes('permission denied') || m.includes('policy') || m.includes('rls') || err.code === '42501') {
+    return 'No se puede buscar el usuario desde la app (permisos de base de datos). Iniciá sesión con el correo electrónico completo o pedí al administrador que revise las políticas RLS de la tabla profiles.';
+  }
+  return null;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -181,6 +225,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [inactive, setInactive] = useState(false);
   const [mustChangePassword, setMustChangePassword] = useState(false);
   const [authBlockMessage, setAuthBlockMessage] = useState<string | null>(null);
+  const [signOutNotice, setSignOutNotice] = useState<string | null>(null);
 
   useEffect(() => {
     let isActive = true;
@@ -261,9 +306,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setMustChangePassword(mustChange);
 
         if (!isActiveUser) {
-          setAuthBlockMessage('Tu usuario está inactivo. Contactá al administrador.');
+          setSignOutNotice(
+            'Tu cuenta está inactiva. Pedí a un administrador del MRV que la reactive en el panel de usuarios antes de volver a intentar.'
+          );
+          setAuthBlockMessage(null);
           await supabase.auth.signOut();
           setUser(null);
+          setLoading(false);
           return;
         }
 
@@ -305,8 +354,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void supabase.auth
       .getSession()
       .then(({ data: { session } }) => applyUser(session?.user ?? null))
-      .catch(() => {
+      .catch((err: unknown) => {
         if (!isActive) return;
+        console.error('getSession:', err);
+        setSignOutNotice(
+          'No se pudo recuperar la sesión (red o almacenamiento). Cerrá la app por completo y volvé a iniciar sesión con correo o usuario y contraseña.'
+        );
         setUser(null);
         setLoading(false);
       });
@@ -321,91 +374,91 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (identifier: string, password: string) => {
     setAuthBlockMessage(null);
-    const trimmed = identifier.trim().toLowerCase();
+    setSignOutNotice(null);
 
-    if (!trimmed) {
-      return { ok: false, error: 'Ingrese usuario, email o contraseña.' };
+    const raw = identifier.trim();
+    if (!raw) {
+      return { ok: false, error: 'Ingresá tu usuario, correo o CI y la contraseña.' };
+    }
+    if (!password) {
+      return { ok: false, error: 'Ingresá la contraseña.' };
     }
 
-    // Supabase auth only supports sign-in by email. If the user types a
-    // `username`, try to resolve it to an email via RPC.
-    let email = trimmed;
-    
-    if (!trimmed.includes('@')) {
-      // El usuario ingresó un usuario/CI, necesitamos resolver a email
-      console.log(`🔍 Resolviendo usuario "${trimmed}" a email...`);
-      
+    let email = '';
+
+    if (raw.includes('@')) {
+      email = raw.trim().toLowerCase();
+    } else {
+      const usernameKey = raw.trim().toLowerCase();
+
       try {
-        // Estrategia 1: Usar RPC optimizada
-        const { data: resolvedEmail, error: resolveError } = await (supabase as any).rpc('resolve_email_by_username', {
-          p_username: trimmed,
+        const { data: rpcData, error: resolveError } = await supabase.rpc('resolve_email_by_username', {
+          p_username: usernameKey,
         });
 
-        if (resolveError) {
-          console.warn('⚠️  RPC error:', resolveError);
-          // Continuar sin error
-        }
-
-        if (typeof resolvedEmail === 'string' && resolvedEmail) {
-          email = resolvedEmail;
-          console.log(`✅ Resuelto a email: ${email}`);
+        const fromRpc = coerceRpcEmail(rpcData);
+        if (fromRpc) {
+          email = fromRpc;
         } else {
-          console.log('❌ RPC no devolvió email, intentando fallback...');
-          
-          // Estrategia 2: Fallback - buscar directamente en profiles (como anon)
-          // Esta consulta funciona porque profiles tiene política de lectura pública para username
-          try {
-            const { data: profileData, error: profileError } = await supabase
-              .from('profiles')
-              .select('email')
-              .eq('username', trimmed)
-              .maybeSingle();
-
-            if (profileError && !profileError.message.includes('no rows')) {
-              console.warn('Profile lookup error:', profileError);
-            }
-
-            if (profileData?.email) {
-              email = profileData.email;
-              console.log(`✅ Encontrado en profiles: ${email}`);
-            } else {
-              console.error('❌ Usuario no encontrado en profiles');
-              return { 
-                ok: false, 
-                error: `El usuario "${trimmed}" no existe. Verifica que es el usuario correcto o usa tu email para iniciar sesión.` 
+          if (resolveError) {
+            const re = (resolveError.message || '').toLowerCase();
+            if (re.includes('function') && re.includes('does not exist')) {
+              return {
+                ok: false,
+                error:
+                  'Ingresar solo con «usuario» no está habilitado en el servidor (falta la función de resolución). Usá tu correo electrónico completo o pedí al administrador que ejecute la migración en Supabase.',
               };
             }
-          } catch (fallbackErr) {
-            console.error('❌ Error en fallback:', fallbackErr);
-            return { 
-              ok: false, 
-              error: 'No se pudo resolver el usuario. Intenta con tu email o verifica el usuario.' 
+            console.warn('resolve_email_by_username:', resolveError);
+          }
+
+          const { data: profileRow, error: profileError } = await supabase
+            .from('profiles')
+            .select('email')
+            .ilike('username', usernameKey)
+            .limit(1)
+            .maybeSingle();
+
+          const rlsMsg = mapProfileLookupError(profileError);
+          if (rlsMsg) return { ok: false, error: rlsMsg };
+
+          if (profileError && !/PGRST116|0 rows|no rows/i.test(profileError.message)) {
+            console.warn('profiles lookup:', profileError);
+            return {
+              ok: false,
+              error: `No se pudo buscar el usuario en el servidor (${profileError.message}). Probá con tu correo electrónico.`,
+            };
+          }
+
+          const rowEmail = profileRow?.email?.trim().toLowerCase();
+          if (rowEmail?.includes('@')) {
+            email = rowEmail;
+          } else {
+            return {
+              ok: false,
+              error: `No encontramos el usuario «${usernameKey}». Revisá la escritura o iniciá sesión con el correo con el que te registraron en el MRV.`,
             };
           }
         }
       } catch (err) {
-        console.error('❌ Error inesperado en resolución:', err);
-        return { 
-          ok: false, 
-          error: 'Error al resolver usuario. Intenta con tu email.' 
+        console.error(err);
+        return {
+          ok: false,
+          error: 'No se pudo buscar tu usuario (fallo de red o servidor). Probá con el correo electrónico o revisá la conexión.',
         };
       }
     }
 
     email = email.trim().toLowerCase();
-
     if (!email.includes('@')) {
-      return { ok: false, error: 'Usuario o email inválido. Usa tu email para iniciar sesión.' };
+      return { ok: false, error: 'No pudimos obtener un correo válido. Iniciá sesión escribiendo el correo completo (con @).' };
     }
 
-    console.log(`🔐 Intentando login con: ${email}`);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
-      console.error('❌ Login error:', error);
       return { ok: false, error: normalizeAuthError(error.message) };
     }
-    
-    console.log('✅ Login exitoso');
+
     return { ok: true };
   };
 
@@ -484,6 +537,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     await supabase.auth.signOut();
+    setSignOutNotice(null);
     setUser(null);
     setApprovalPending(false);
     setInactive(false);
@@ -492,7 +546,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, approvalPending, inactive, mustChangePassword, authBlockMessage, login, signup, changePassword, logout }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        approvalPending,
+        inactive,
+        mustChangePassword,
+        authBlockMessage,
+        signOutNotice,
+        dismissSignOutNotice: () => setSignOutNotice(null),
+        login,
+        signup,
+        changePassword,
+        logout,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

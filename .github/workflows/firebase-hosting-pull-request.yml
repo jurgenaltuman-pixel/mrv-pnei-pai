@@ -26,6 +26,16 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
+      - name: Verify build secrets
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          set -euo pipefail
+          missing() { echo "::error::$1"; exit 1; }
+          [ -n "${VITE_SUPABASE_URL:-}" ] || missing "Falta VITE_SUPABASE_URL en los secretos del repo."
+          [ -n "${VITE_SUPABASE_PUBLISHABLE_KEY:-}" ] || missing "Falta VITE_SUPABASE_PUBLISHABLE_KEY."
+
       - name: Build web
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
