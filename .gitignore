@@ -1,0 +1,41 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-vite
+release
+dist-ssr
+*.local
+.env
+.env.local
+.env.*.local
+.env.production.local
+
+# Android signing (nunca en git)
+android/keystore.properties
+android/app/*.keystore
+android/app/release.keystore
+*.jks
+*.keystore
+
+# Capacitor assets generados
+assets/icon.png
+assets/splash.png
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "mrv2026"
+  },
+  "targets": {
+    "mrv2026": {
+      "hosting": {
+        "mrvpai": [
+          "mrvpai"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}
