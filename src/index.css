@@ -1,0 +1,220 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+.mrv-map-shell {
+  overflow: visible;
+}
+.mrv-map-shell .leaflet-container {
+  font-family: inherit;
+  z-index: 0;
+  border-radius: 1rem;
+}
+.leaflet-popup-pane {
+  z-index: 700 !important;
+}
+.leaflet-popup-content-wrapper {
+  border-radius: 0.75rem;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+}
+.leaflet-popup.mrv-map-popup .leaflet-popup-content {
+  margin: 0.5rem 0.65rem;
+  min-width: 11rem;
+}
+
+.leaflet-tooltip.mrv-map-tooltip {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.12);
+  padding: 0;
+  pointer-events: none;
+}
+
+.leaflet-tooltip.mrv-map-tooltip::before {
+  border-top-color: hsl(var(--card));
+}
+
+.mrv-map-label-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.35rem 0.45rem;
+  max-width: 11rem;
+  font-size: 10px;
+  line-height: 1.25;
+  text-align: left;
+  color: hsl(var(--foreground));
+}
+
+.mrv-map-label-inner .mrv-label-name {
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.mrv-map-label-inner .mrv-label-ok {
+  font-weight: 700;
+  color: #16a34a;
+}
+
+.mrv-map-label-inner .mrv-label-bad {
+  font-weight: 700;
+  color: #dc2626;
+}
+
+.mrv-map-label-inner .mrv-label-meta {
+  color: hsl(var(--muted-foreground));
+  font-size: 9px;
+}
+
+.mrv-map-label-inner .mrv-label-motivo {
+  color: hsl(var(--muted-foreground));
+  font-size: 9px;
+  font-style: italic;
+  margin-top: 0.1rem;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 25% 97%;
+    --foreground: 215 30% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 215 30% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 30% 12%;
+
+    /* Azul Francia #0055A4 → HSL ~210, 100%, 32% */
+    --primary: 210 100% 32%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 20% 93%;
+    --secondary-foreground: 210 30% 20%;
+
+    --muted: 210 18% 95%;
+    --muted-foreground: 210 12% 46%;
+
+    --accent: 210 60% 93%;
+    --accent-foreground: 210 100% 28%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 152 60% 38%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    --border: 210 22% 88%;
+    --input: 210 22% 88%;
+    --ring: 210 100% 32%;
+
+    --radius: 0.75rem;
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 210 100% 32%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    overflow-x: hidden;
+  }
+  #root {
+    min-height: 100dvh;
+  }
+  input, select, textarea {
+    @apply text-foreground;
+    font-size: 16px;
+  }
+  button, a, [role="button"] {
+    touch-action: manipulation;
+  }
+}
+
+@layer components {
+  .btn-vacunado {
+    @apply bg-success text-success-foreground font-bold py-4 px-6 rounded-xl text-base shadow-md active:scale-95 transition-all duration-150 flex items-center justify-center gap-2;
+  }
+  .btn-no-vacunado {
+    @apply bg-destructive text-destructive-foreground font-bold py-4 px-6 rounded-xl text-base shadow-md active:scale-95 transition-all duration-150 flex items-center justify-center gap-2;
+  }
+  .section-card {
+    @apply bg-card rounded-2xl shadow-sm border p-3 sm:p-4 mb-3;
+  }
+  .section-title {
+    @apply text-xs font-bold uppercase tracking-wider text-primary mb-3 flex items-center gap-2;
+  }
+  .field-label {
+    @apply text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 block;
+  }
+  .counter-btn {
+    @apply rounded-xl font-bold text-xl flex items-center justify-center shadow-sm active:scale-90 transition-transform;
+  }
+  .nav-tab {
+    @apply flex-1 py-2.5 px-2 font-semibold text-center transition-all duration-200 flex flex-col items-center;
+  }
+  .nav-tab-active {
+    @apply text-primary;
+  }
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .safe-area-top {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  .pb-app {
+    padding-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
+  }
+  .auth-input {
+    @apply w-full min-h-[3rem] px-4 rounded-xl border bg-background text-foreground text-base sm:text-sm focus:ring-2 focus:ring-ring focus:border-primary outline-none transition-all;
+  }
+  .auth-shell {
+    @apply min-h-dvh w-full flex flex-col lg:grid lg:grid-cols-2;
+  }
+
+  .dash-card {
+    @apply bg-card rounded-2xl border shadow-sm;
+  }
+  .dash-kpi {
+    @apply rounded-2xl p-3.5 shadow-sm;
+  }
+  .dash-select {
+    @apply h-10 px-3 rounded-xl border bg-background text-xs font-medium;
+  }
+  .dash-btn-primary {
+    @apply h-9 px-3 rounded-xl bg-primary text-primary-foreground text-xs font-bold flex items-center gap-1 active:scale-95;
+  }
+  .dash-btn-secondary {
+    @apply h-9 px-3 rounded-xl bg-secondary text-secondary-foreground text-xs font-bold flex items-center gap-1 active:scale-95;
+  }
+  .admin-hero {
+    @apply shadow-sm;
+  }
+}
+
+@keyframes pulse-success {
+  0%, 100% { box-shadow: 0 0 0 0 hsl(152 60% 38% / 0.4); }
+  50% { box-shadow: 0 0 0 8px hsl(152 60% 38% / 0); }
+}
+.animate-pulse-success {
+  animation: pulse-success 2s infinite;
+}

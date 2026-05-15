@@ -1,0 +1,139 @@
+# Compila APK release + AAB (Play Store) sin Android Studio local.
+# Artefactos descargables en Actions → workflow run → Artifacts.
+name: Android Build (APK + AAB)
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+  JAVA_VERSION: '21'
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env JAVA_VERSION }}
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            android/.gradle
+          key: ${{ runner.os }}-gradle-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Version from package.json
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          MA=$(echo "$VERSION" | cut -d. -f1)
+          MI=$(echo "$VERSION" | cut -d. -f2)
+          PA=$(echo "$VERSION" | cut -d. -f3)
+          CODE=$((MA * 10000 + MI * 100 + PA))
+          echo "VERSION_NAME=$VERSION" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$CODE" >> "$GITHUB_ENV"
+
+      - name: Build web (Vite)
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+        run: npm run build
+
+      - name: Capacitor sync Android
+        run: npx cap sync android
+
+      - name: Configure Android signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: bash scripts/ci-android-signing.sh
+
+      - name: Grant execute permission for Gradle
+        run: chmod +x android/gradlew
+
+      - name: Build Release APK and AAB
+        working-directory: android
+        run: |
+          ./gradlew assembleRelease bundleRelease \
+            -PVERSION_NAME="$VERSION_NAME" \
+            -PVERSION_CODE="$VERSION_CODE" \
+            --build-cache \
+            --no-daemon
+
+      - name: Build Debug APK (QA rápido)
+        working-directory: android
+        run: ./gradlew assembleDebug --build-cache --no-daemon
+
+      - name: Rename artifacts
+        run: |
+          mkdir -p mobile-artifacts
+          cp android/app/build/outputs/apk/release/app-release.apk "mobile-artifacts/MRV-${VERSION_NAME}-release.apk" 2>/dev/null || true
+          cp android/app/build/outputs/bundle/release/app-release.aab "mobile-artifacts/MRV-${VERSION_NAME}-release.aab" 2>/dev/null || true
+          cp android/app/build/outputs/apk/debug/app-debug.apk "mobile-artifacts/MRV-${VERSION_NAME}-debug.apk" 2>/dev/null || true
+          ls -la mobile-artifacts/ || ls -laR android/app/build/outputs/
+
+      - name: Upload Release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: mrv-android-apk-release-${{ env.VERSION_NAME }}
+          path: |
+            mobile-artifacts/*-release.apk
+            android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload Play Store AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: mrv-android-aab-${{ env.VERSION_NAME }}
+          path: |
+            mobile-artifacts/*-release.aab
+            android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: mrv-android-apk-debug-${{ env.VERSION_NAME }}
+          path: |
+            mobile-artifacts/*-debug.apk
+            android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
+          retention-days: 14

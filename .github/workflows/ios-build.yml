@@ -1,0 +1,56 @@
+# Valida build iOS en macOS (sin Xcode local). IPA requiere certificados Apple en secretos.
+name: iOS Build (Capacitor)
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build web
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+        run: npm run build
+
+      - name: Capacitor sync iOS
+        run: npx cap sync ios
+
+      - name: Build for iOS Simulator (sin firma Apple)
+        working-directory: ios/App
+        run: |
+          xcodebuild -project App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -derivedDataPath build \
+            build \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Upload iOS build log folder
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-simulator-build-${{ github.run_number }}
+          path: ios/App/build
+          if-no-files-found: ignore
+          retention-days: 7

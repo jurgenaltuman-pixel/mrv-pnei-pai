@@ -1,0 +1,21 @@
+{
+  "hosting": [
+    {
+      "target": "mrvpai",
+      "public": "dist-vite",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**",
+        "**/*.exe",
+        "**/win-unpacked/**"
+      ],
+      "rewrites": [
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ]
+    }
+  ]
+}
