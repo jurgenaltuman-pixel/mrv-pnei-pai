@@ -13,7 +13,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NODE_VERSION: '20'
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  NODE_VERSION: '22'
   JAVA_VERSION: '21'
 
 jobs:
@@ -32,6 +33,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
+          cache-dependency-path: package-lock.json
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -72,8 +74,25 @@ jobs:
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
         run: npm run build
 
+      - name: Verify web build output
+        run: |
+          test -d dist-vite
+          test -f dist-vite/index.html
+          ls -la dist-vite | head -20
+
+      - name: Capacitor doctor
+        run: npx cap doctor || true
+
       - name: Capacitor sync Android
-        run: npx cap sync android
+        run: |
+          set -euxo pipefail
+          sed -i 's/\r$//' android/gradlew scripts/ci-android-signing.sh 2>/dev/null || true
+          chmod +x android/gradlew scripts/ci-android-signing.sh
+          # JSON evita fallos del loader TypeScript en algunos runners de GitHub
+          if [ -f capacitor.config.ts ]; then mv capacitor.config.ts _capacitor.config.ts.bak; fi
+          npx cap copy android
+          npx cap update android
+          if [ -f _capacitor.config.ts.bak ]; then mv _capacitor.config.ts.bak capacitor.config.ts; fi
 
       - name: Configure Android signing
         env:
@@ -82,9 +101,6 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: bash scripts/ci-android-signing.sh
-
-      - name: Grant execute permission for Gradle
-        run: chmod +x android/gradlew
 
       - name: Build Release APK and AAB
         working-directory: android

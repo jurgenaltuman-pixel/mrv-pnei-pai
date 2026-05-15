@@ -15,7 +15,7 @@ const config: CapacitorConfig = {
   ios: {
     contentInset: 'automatic',
     backgroundColor: '#0055A4',
-    scheme: 'MRV2026',
+    scheme: 'mrv2026',
   },
   plugins: {
     SplashScreen: {
