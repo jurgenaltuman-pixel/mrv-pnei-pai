@@ -6,7 +6,7 @@ document.documentElement.lang = "es";
 // @ts-expect-error: propiedad no tipada en TS estándar
 document.documentElement.translate = false;
 
-const SW_SWEEP_KEY = "mrv-sw-sweep-2026-05-18-leaflet-react";
+const SW_SWEEP_KEY = "mrv-sw-sweep-2026-05-19-no-manual-vendor";
 
 async function sweepStaleCachesOnce(): Promise<boolean> {
   if (typeof window === "undefined") return false;
