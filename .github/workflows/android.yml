@@ -28,6 +28,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Verify Android project in repo
+        run: |
+          test -f android/gradlew || (echo "Falta android/gradlew — subí la carpeta android/" && exit 1)
+          test -f android/build.gradle
+          chmod +x android/gradlew
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -40,20 +46,21 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
+          cache: false
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        run: |
+          echo "ANDROID_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Cache Gradle
-        uses: actions/cache@v4
+      - name: Setup Gradle (carpeta android/)
+        uses: gradle/actions/setup-gradle@v4
         with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-            android/.gradle
-          key: ${{ runner.os }}-gradle-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
+          gradle-version: wrapper
+          build-root-directory: android
+          cache-read-only: false
 
       - name: Install dependencies
         run: npm ci
@@ -78,7 +85,6 @@ jobs:
         run: |
           test -d dist-vite
           test -f dist-vite/index.html
-          ls -la dist-vite | head -20
 
       - name: Capacitor doctor
         run: npx cap doctor || true
@@ -88,7 +94,6 @@ jobs:
           set -euxo pipefail
           sed -i 's/\r$//' android/gradlew scripts/ci-android-signing.sh 2>/dev/null || true
           chmod +x android/gradlew scripts/ci-android-signing.sh
-          # JSON evita fallos del loader TypeScript en algunos runners de GitHub
           if [ -f capacitor.config.ts ]; then mv capacitor.config.ts _capacitor.config.ts.bak; fi
           npx cap copy android
           npx cap update android
