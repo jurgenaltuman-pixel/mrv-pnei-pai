@@ -1,6 +1,5 @@
-# Compila APK release + AAB (Play Store) sin Android Studio local.
-# Artefactos descargables en Actions → workflow run → Artifacts.
-name: Android Build (APK + AAB)
+# MRV — APK + AAB con Capacitor (sin Android Studio local)
+name: Android CI
 
 on:
   push:
@@ -38,7 +37,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: ${{ env JAVA_VERSION }}
+          java-version: ${{ env.JAVA_VERSION }}
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -96,7 +95,7 @@ jobs:
             --build-cache \
             --no-daemon
 
-      - name: Build Debug APK (QA rápido)
+      - name: Build Debug APK
         working-directory: android
         run: ./gradlew assembleDebug --build-cache --no-daemon
 
