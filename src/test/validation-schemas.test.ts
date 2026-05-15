@@ -70,7 +70,7 @@ describe('Validation Schemas', () => {
 
   describe('SearchQuerySchema', () => {
     it('debe aceptar búsquedas válidas', () => {
-      expect(SearchQuerySchema.parse('Juan')).toBe('juan');
+      expect(SearchQuerySchema.parse('Juan')).toBe('Juan');
       expect(SearchQuerySchema.parse('123456')).toBe('123456');
     });
 

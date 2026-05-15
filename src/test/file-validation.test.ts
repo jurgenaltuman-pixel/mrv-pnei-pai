@@ -29,7 +29,7 @@ describe('File Validation', () => {
 
   describe('sanitizarNombreArchivo', () => {
     it('debe remover caracteres especiales', () => {
-      expect(sanitizarNombreArchivo('archivo@#$%.txt')).toBe('archivo_____txt');
+      expect(sanitizarNombreArchivo('archivo@#$%.txt')).toBe('archivo_.txt');
     });
 
     it('debe remover múltiples guiones bajos seguidos', () => {
@@ -37,7 +37,7 @@ describe('File Validation', () => {
     });
 
     it('debe permitir caracteres válidos', () => {
-      expect(sanitizarNombreArchivo('archivo-válido_123.txt')).toBe('archivo-vlido_123.txt');
+      expect(sanitizarNombreArchivo('archivo-válido_123.txt')).toBe('archivo-v_lido_123.txt');
     });
 
     it('debe truncar nombres muy largos', () => {

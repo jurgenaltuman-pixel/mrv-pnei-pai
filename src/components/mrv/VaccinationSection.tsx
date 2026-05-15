@@ -71,6 +71,8 @@ export default function VaccinationSection(props: Props) {
     } else {
       props.setEstadoVacuna('no_vacunado');
       props.setEsquemaCompleto(false);
+      props.setDosisSpr(null);
+      props.setFechaSpr('');
     }
   };
 
@@ -111,7 +113,9 @@ export default function VaccinationSection(props: Props) {
                   onClick={() => props.setLibreta(v)}
                   className={`flex-1 h-10 rounded-lg font-semibold text-sm transition-colors ${
                     props.libreta === v
-                      ? v ? 'bg-success text-success-foreground' : 'bg-muted text-muted-foreground'
+                      ? v
+                        ? 'bg-success text-success-foreground shadow-sm'
+                        : 'bg-destructive text-destructive-foreground shadow-sm'
                       : 'bg-secondary text-secondary-foreground'
                   }`}
                 >
@@ -145,7 +149,7 @@ export default function VaccinationSection(props: Props) {
             </button>
           </div>
 
-          {(props.tieneCvs === true || props.tieneCvs === false) && (
+          {props.tieneCvs === true && (
             <div className="mt-3 space-y-3 p-3 rounded-xl bg-muted/40 border">
               <p className="text-xs font-semibold text-muted-foreground uppercase">Fecha dosis SPR</p>
               <p className="text-[11px] text-muted-foreground -mt-2">
@@ -181,11 +185,9 @@ export default function VaccinationSection(props: Props) {
                     : 'Fecha fuera de campaña — puede corresponder a esquema previo'}
                 </p>
               )}
-              {props.tieneCvs === true && (
-                <div className="rounded-lg bg-success/10 border border-success/30 px-3 py-2 text-sm font-semibold text-success">
-                  Esquema: {props.esquemaCompleto ? 'Completo (2+ dosis)' : 'Incompleto'}
-                </div>
-              )}
+              <div className="rounded-lg bg-success/10 border border-success/30 px-3 py-2 text-sm font-semibold text-success">
+                Esquema: {props.esquemaCompleto ? 'Completo (2+ dosis)' : 'Incompleto'}
+              </div>
             </div>
           )}
         </div>

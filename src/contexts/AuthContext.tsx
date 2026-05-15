@@ -50,7 +50,9 @@ function normalizeAuthError(message: string): string {
   
   if (m.includes('invalid login credentials')) return 'Credenciales inválidas. Verifique usuario/correo y contraseña.';
   if (m.includes('user not found') || m.includes('no user found')) return 'Usuario o correo no encontrado.';
-  if (m.includes('email not confirmed') || m.includes('email_not_confirmed')) return 'Acceso permitido. Inicie sesión para continuar.';
+  if (m.includes('email not confirmed') || m.includes('email_not_confirmed')) {
+    return 'Debe confirmar el correo antes de entrar. Revise su bandeja de entrada (y spam) o pida a un administrador que desactive la confirmación por email en Supabase.';
+  }
   if (m.includes('user already registered') || m.includes('already exists') || m.includes('duplicate')) return 'Este correo o usuario ya está registrado.';
   if (m.includes('password')) return 'La contraseña no cumple los requisitos (mínimo 6 caracteres).';
   if (m.includes('invalid email')) return 'El formato del correo electrónico no es válido.';
@@ -289,7 +291,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             .subscribe();
           channelUserId = supaUser.id;
         }
-      } catch {
+      } catch (e) {
+        console.error('applyUser (perfil / roles):', e);
       }
     };
 

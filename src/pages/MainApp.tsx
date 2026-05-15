@@ -14,6 +14,7 @@ import WorkflowSteps from '@/components/mrv/WorkflowSteps';
 import BottomNav from '@/components/mrv/BottomNav';
 import { generarCodigoTemporalRve, validarFormatoCodigoTemporal } from '@/lib/temp-code-rve';
 import { isFechaEnCampanaCvs } from '@/lib/mrv-constants';
+import { isMrvCvsTerrenoCompleto } from '@/lib/mrv-cvs-flow';
 import type { FuenteVerificacion, AccionTomada } from '@/lib/mrv-constants';
 import { acumularJornada, getJornadaStats, type JornadaStats } from '@/lib/jornada-storage';
 import { MrvAppLogo } from '@/components/branding/MrvAppLogo';
@@ -396,14 +397,18 @@ export default function MainApp() {
 
   const estadoVacunaValido = isVisitaSinDatosNino ? true : estadoVacuna !== null;
   const docValido = isVisitaSinDatosNino || (sinDocumento ? validarFormatoCodigoTemporal(documento) : documento.length >= 6);
-  const cvsCompleto = isVisitaSinDatosNino || (
-    fuenteVerificacion !== '' &&
-    libreta !== null &&
-    tieneCvs !== null &&
-    (tieneCvs === true || rechazoVacunacion || Boolean(motivo.trim())) &&
-    (tieneCvs === false ? Boolean(accionTomada) : true) &&
-    (fechaSpr ? Boolean(dosisSpr) : true)
-  );
+  const cvsCompleto =
+    isVisitaSinDatosNino ||
+    isMrvCvsTerrenoCompleto({
+      fuenteVerificacion,
+      libreta,
+      tieneCvs,
+      rechazoVacunacion,
+      motivo,
+      accionTomada,
+      dosisSpr,
+      fechaSpr,
+    });
 
   const canSubmit =
     regionNombre &&
@@ -420,13 +425,14 @@ export default function MainApp() {
     if (!nombre || !docValido || !fechaNacimiento || !sexo) return 1;
     if (!fuenteVerificacion || libreta === null) return 2;
     if (tieneCvs === null) return 3;
+    if (tieneCvs === true && (!dosisSpr || !fechaSpr.trim())) return 3;
     if (tieneCvs === false && !rechazoVacunacion && !motivo.trim()) return 4;
     if (tieneCvs === false && !accionTomada) return 5;
     if (totalViviendas < 1) return 6;
     return 7;
   }, [
     regionNombre, barrio, isVisitaSinDatosNino, nombre, docValido, fechaNacimiento, sexo,
-    fuenteVerificacion, libreta, tieneCvs, rechazoVacunacion, motivo, accionTomada, totalViviendas,
+    fuenteVerificacion, libreta, tieneCvs, dosisSpr, fechaSpr, rechazoVacunacion, motivo, accionTomada, totalViviendas,
   ]);
 
   useEffect(() => {
