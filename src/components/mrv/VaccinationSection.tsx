@@ -85,24 +85,8 @@ export default function VaccinationSection(props: Props) {
         {props.stepLabel}
       </div>
 
-      {!props.visitaSinDatosNino && (props.subStep === 'validacion' || props.subStep === 'all' || !props.subStep) && (
-        <div className="space-y-3 pb-4 border-b mb-4">
-          <div>
-            <label className="field-label flex items-center gap-1">
-              Fuente de verificación <span className="text-destructive font-bold">*</span>
-            </label>
-            <select
-              value={props.fuenteVerificacion}
-              onChange={(e) => props.setFuenteVerificacion(e.target.value as FuenteVerificacion)}
-              className="w-full h-11 px-3 rounded-lg border bg-background text-sm font-medium"
-            >
-              <option value="">Seleccionar fuente...</option>
-              {FUENTES_VERIFICACION.map((f) => (
-                <option key={f.id} value={f.id}>{f.label}</option>
-              ))}
-            </select>
-          </div>
-
+      {!props.visitaSinDatosNino && (props.subStep === 'validacion' || props.subStep === 'evaluacion' || props.subStep === 'all' || !props.subStep) && (
+        <div className="space-y-4 pb-4 border-b mb-4">
           <div>
             <label className="field-label">¿Presenta libreta o registro de vacunación?</label>
             <div className="flex gap-2 mt-1">
@@ -124,33 +108,54 @@ export default function VaccinationSection(props: Props) {
               ))}
             </div>
           </div>
-        </div>
-      )}
 
-      {!props.visitaSinDatosNino && (props.subStep === 'evaluacion' || props.subStep === 'all' || !props.subStep) && (
-        <div className="space-y-3 pb-4 border-b mb-4">
-          <label className="field-label flex items-center gap-1">
-            ¿Tiene la dosis CVS (SPR) aplicada? <span className="text-destructive font-bold">*</span>
-          </label>
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              type="button"
-              onClick={() => handleTieneCvs(true)}
-              className={`btn-vacunado h-auto py-3 ${props.tieneCvs === true ? 'ring-4 ring-success/30' : 'opacity-70'}`}
+          <div>
+            <label className="field-label flex items-center gap-1">
+              Fuente de verificación <span className="text-destructive font-bold">*</span>
+            </label>
+            <select
+              value={props.fuenteVerificacion}
+              onChange={(e) => props.setFuenteVerificacion(e.target.value as FuenteVerificacion)}
+              className="w-full h-11 px-3 rounded-lg border bg-background text-sm font-medium"
+              title="Fuente de verificación"
             >
-              <Check className="w-5 h-5" /> SÍ tiene CVS
-            </button>
-            <button
-              type="button"
-              onClick={() => handleTieneCvs(false)}
-              className={`btn-no-vacunado h-auto py-3 ${props.tieneCvs === false ? 'ring-4 ring-destructive/30' : 'opacity-70'}`}
-            >
-              <X className="w-5 h-5" /> NO tiene CVS
-            </button>
+              <option value="">Seleccionar fuente...</option>
+              {FUENTES_VERIFICACION.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <p className="text-[11px] font-bold uppercase tracking-wider text-primary border-t border-dotted border-border pt-3">
+            Validaciones MRV
+          </p>
+
+          <div>
+            <label className="field-label flex items-center gap-1">
+              ¿Tiene la dosis CVS (SPR) aplicada? <span className="text-destructive font-bold">*</span>
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => handleTieneCvs(true)}
+                className={`btn-vacunado h-auto py-3 ${props.tieneCvs === true ? 'ring-4 ring-success/30' : 'opacity-70'}`}
+              >
+                <Check className="w-5 h-5" /> Vacunado
+              </button>
+              <button
+                type="button"
+                onClick={() => handleTieneCvs(false)}
+                className={`btn-no-vacunado h-auto py-3 ${props.tieneCvs === false ? 'ring-4 ring-destructive/30' : 'opacity-70'}`}
+              >
+                <X className="w-5 h-5" /> No vacunado
+              </button>
+            </div>
           </div>
 
           {props.tieneCvs === true && (
-            <div className="mt-3 space-y-3 p-3 rounded-xl bg-muted/40 border">
+            <div className="mt-1 space-y-3 p-3 rounded-xl bg-muted/40 border">
               <p className="text-xs font-semibold text-muted-foreground uppercase">Fecha dosis SPR</p>
               <p className="text-[11px] text-muted-foreground -mt-2">
                 Confirme esquema (2 dosis previas) o dosis en campaña (09 mar – 29 may 2026)
@@ -177,6 +182,7 @@ export default function VaccinationSection(props: Props) {
                 value={props.fechaSpr}
                 onChange={(e) => props.setFechaSpr(e.target.value)}
                 className="w-full h-10 px-3 rounded-lg border bg-background text-sm"
+                title="Fecha de la dosis SPR"
               />
               {props.fechaSpr && (
                 <p className={`text-xs font-medium ${props.fechaSprValida ? 'text-success' : 'text-warning'}`}>

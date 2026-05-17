@@ -1,9 +1,10 @@
 import type { ImgHTMLAttributes } from 'react';
+import { APP_TITLE_SHORT } from '@/lib/app-branding';
 
-const LOGO_SRC = '/logo-mrv.png';
+const LOGO_SRC = '/logo-pnei-pai-mspbs.png';
 
-/** Logo institucional MRV (PNG en /public). */
-export function MrvAppLogo({ className, alt = 'MRV 2026', ...props }: ImgHTMLAttributes<HTMLImageElement>) {
+/** Logo institucional PNEI / PAI — MSPBS (PNG en /public). */
+export function MrvAppLogo({ className, alt = APP_TITLE_SHORT, ...props }: ImgHTMLAttributes<HTMLImageElement>) {
   return (
     <img
       src={LOGO_SRC}

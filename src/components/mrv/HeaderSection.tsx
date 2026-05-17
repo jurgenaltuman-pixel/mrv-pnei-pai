@@ -1,4 +1,3 @@
-import { useAuth } from '@/contexts/AuthContext';
 import { useOrgStructure } from '@/hooks/useOrgStructure';
 import { supabase } from '@/integrations/supabase/client';
 import { useEffect, useMemo, useState } from 'react';
@@ -35,7 +34,6 @@ interface Props {
 }
 
 export default function HeaderSection(props: Props) {
-  const { user } = useAuth();
   const { regiones, getDistritosByRegion, getServiciosByDistrito, getBarriosByDistrito } = useOrgStructure();
   const now = new Date();
 
@@ -121,7 +119,7 @@ export default function HeaderSection(props: Props) {
         Ubicación y Fecha
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm mb-3">
+      <div className="grid grid-cols-2 gap-2 text-sm mb-3">
         <div>
           <span className="text-muted-foreground text-xs">Fecha:</span>
           <span className="font-semibold ml-1">{now.toLocaleDateString('es-PY')}</span>
@@ -130,11 +128,7 @@ export default function HeaderSection(props: Props) {
           <span className="text-muted-foreground text-xs">Hora:</span>
           <span className="font-semibold ml-1">{now.toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
         </div>
-        <div>
-          <span className="text-muted-foreground text-xs">Usuario:</span>
-          <span className="font-semibold ml-1">{user?.nombre}</span>
-        </div>
-        <div className="flex items-center gap-1">
+        <div className="col-span-2 flex items-center gap-1">
           <div className={`${gpsColor} text-xs font-bold flex items-center gap-1`}>
             <GpsIcon className={`w-3.5 h-3.5 ${props.geo.status === 'loading' ? 'animate-spin' : ''}`} />
             <span className="truncate">{gpsLabel}</span>
@@ -262,41 +256,39 @@ export default function HeaderSection(props: Props) {
             )}
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-2">
           <div>
             <label className="field-label flex items-center gap-1">
               Barrio / Localidad <span className="text-destructive font-bold">*</span>
             </label>
-            {filteredBarrios.length > 0 ? (
-              <select
-                value={props.barrio}
-                onChange={(e) => props.setBarrio(e.target.value)}
-                className="w-full h-10 px-3 rounded-lg border bg-background text-sm"
-                disabled={!props.distritoId || props.scopeLocked}
-                title="Seleccionar barrio/localidad"
-              >
-                <option value="">Seleccionar...</option>
-                {filteredBarrios.map((b) => <option key={b.id} value={b.nombre}>{b.nombre}</option>)}
-              </select>
-            ) : (
-              <>
-                <input
-                  value={props.barrio}
-                  onChange={e => props.setBarrio(e.target.value)}
-                  className="w-full h-10 px-3 rounded-lg border bg-background text-sm"
-                  placeholder={props.distritoId ? 'Escriba o seleccione barrio' : 'Seleccione distrito primero'}
-                  disabled={!props.distritoId || props.scopeLocked}
-                  list={inputBarriosFallback}
-                />
-                {barriosFallback.length > 0 && (
-                  <datalist id={inputBarriosFallback}>
-                    {barriosFallback.map((item) => (
-                      <option key={item} value={item} />
-                    ))}
-                  </datalist>
-                )}
-              </>
+            <input
+              value={props.barrio}
+              onChange={(e) => props.setBarrio(e.target.value)}
+              className="w-full h-10 px-3 rounded-lg border bg-background text-sm"
+              placeholder={
+                props.distritoId
+                  ? 'Escriba o elija un barrio de la lista'
+                  : 'Seleccione distrito primero'
+              }
+              disabled={!props.distritoId || props.scopeLocked}
+              list={inputBarriosFallback}
+              title="Si no figura en la lista, escriba el nombre del barrio manualmente"
+            />
+            {(filteredBarrios.length > 0 || barriosFallback.length > 0) && (
+              <datalist id={inputBarriosFallback}>
+                {filteredBarrios.map((b) => (
+                  <option key={b.id} value={b.nombre} />
+                ))}
+                {barriosFallback
+                  .filter((b) => !filteredBarrios.some((fb) => fb.nombre === b))
+                  .map((item) => (
+                    <option key={`fb-${item}`} value={item} />
+                  ))}
+              </datalist>
             )}
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Podés escribir un barrio que no esté en el catálogo si corresponde al terreno.
+            </p>
           </div>
           <div>
             <label className="field-label">Responsable</label>

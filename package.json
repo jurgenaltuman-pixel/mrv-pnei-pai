@@ -2,8 +2,8 @@
   "name": "vite_react_shadcn_ts",
   "private": true,
   "version": "2.6.1",
-  "description": "Monitoreo Rápido de Vacunados 2026 - Sistema de Registro de Vacunación",
-  "author": "MRV Team <support@mrv.vaccinator.local>",
+  "description": "M R V — PNEI y PAI — MSPBS · registro nominal en terreno (soporte offline)",
+  "author": "MSPBS — PNEI / PAI",
   "type": "module",
   "main": "public/electron.cjs",
   "homepage": "./",
@@ -127,7 +127,7 @@
   },
   "build": {
     "appId": "com.mrv.vaccinator2026",
-    "productName": "Monitoreo Rápido de Vacunados",
+    "productName": "M R V PNEI MSPBS",
     "directories": {
       "output": "release"
     },
@@ -150,7 +150,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "MRV 2026"
+      "shortcutName": "M R V PNEI"
     }
   }
 }

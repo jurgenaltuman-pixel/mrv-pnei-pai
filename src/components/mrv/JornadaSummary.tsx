@@ -1,4 +1,4 @@
-import { Home, FileCheck } from 'lucide-react';
+import { Home, FileCheck, DoorOpen, DoorClosed } from 'lucide-react';
 import { casasAbiertasCerradas, type JornadaStats } from '@/lib/jornada-storage';
 
 interface Props {
@@ -21,12 +21,18 @@ export default function JornadaSummary({ stats }: Props) {
       <div className="flex items-center gap-2 min-w-0">
         <Home className="h-4 w-4 shrink-0 text-primary" />
         <span className="font-bold text-foreground truncate">
-          Jornada: {total} casas · {stats.registrosGuardados} encuestas
+          Jornada: <span className="text-primary">{total}</span> viviendas abordadas · {stats.registrosGuardados} encuestas
         </span>
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] font-semibold">
-        <span className="text-success">{abiertas} abiertas</span>
-        <span className="text-warning">{cerradas} cerradas</span>
+        <span className="text-success inline-flex items-center gap-1" title="Efectiva, sin adulto o renuente (contacto)">
+          <DoorOpen className="w-3.5 h-3.5" aria-hidden />
+          {abiertas} abiertas
+        </span>
+        <span className="text-warning inline-flex items-center gap-1" title="No efectiva / cerrada">
+          <DoorClosed className="w-3.5 h-3.5" aria-hidden />
+          {cerradas} cerradas
+        </span>
         <span className="text-muted-foreground flex items-center gap-1">
           <FileCheck className="w-3 h-3" />
           E{stats.efectivas} N{stats.noEfectivas} F{stats.fallidas} R{stats.renuentes}

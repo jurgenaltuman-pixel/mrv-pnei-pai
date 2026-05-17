@@ -1,7 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { dataService, type PersonaBase } from '@/services/dataService';
-import { Search, Check, X, Filter, User } from 'lucide-react';
+import { Search, Check, X, User, CreditCard } from 'lucide-react';
 import { esCodigoTemporal, validarFormatoCodigoTemporal } from '@/lib/temp-code-rve';
+import { TIPOS_DOCUMENTO_MRV, tipoDocumentoSoloDigitos } from '@/lib/tipos-documento-mrv';
 
 interface Props {
   visitaSinDatosNino?: boolean;
@@ -19,6 +20,7 @@ interface Props {
   setSinDocumento: (v: boolean) => void;
   generarDocumentoTemporal: () => void;
   onPersonaSeleccionada: (p: PersonaBase) => void;
+  /** Nombre de la madre (solo lectura si viene de la persona encontrada). */
   nombreMadre: string;
   documentoMadre: string;
   setDocumentoMadre?: (v: string) => void;
@@ -30,59 +32,74 @@ interface Props {
   distritoCodigo?: string;
 }
 
+type SearchMode = 'documento' | 'personales';
+
 export default function ChildDataSection(props: Props) {
   const [sugerencias, setSugerencias] = useState<PersonaBase[]>([]);
   const [searching, setSearching] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [iniNombre, setIniNombre] = useState('');
-  const [iniApellido, setIniApellido] = useState('');
-  const [fechaBusqueda, setFechaBusqueda] = useState('');
-  const [ciMadre, setCiMadre] = useState('');
-  const debounceTimer = useRef<ReturnType<typeof setTimeout>>();
+  const [searchMode, setSearchMode] = useState<SearchMode>('documento');
 
-  const buscar = useCallback(async (query: string) => {
-    if (props.visitaSinDatosNino) {
-      setSugerencias([]);
-      return;
-    }
-    if (query.length < 1) {
+  const [tipoDoc, setTipoDoc] = useState('CI');
+  const [docBusqueda, setDocBusqueda] = useState('');
+
+  const [nombre1, setNombre1] = useState('');
+  const [nombre2, setNombre2] = useState('');
+  const [apellido1, setApellido1] = useState('');
+  const [apellido2, setApellido2] = useState('');
+  const [ciMadrePadre, setCiMadrePadre] = useState('');
+  const [fechaNacBusqueda, setFechaNacBusqueda] = useState('');
+  const [sexoBusqueda, setSexoBusqueda] = useState<'M' | 'F' | ''>('');
+
+  const buscarPorDocumento = useCallback(async () => {
+    if (props.visitaSinDatosNino) return;
+    const raw = docBusqueda.trim();
+    const soloDigitos = tipoDocumentoSoloDigitos(tipoDoc);
+    const normalized = soloDigitos ? raw.replace(/\D/g, '') : raw.replace(/\s+/g, '').toUpperCase();
+    const minLen = soloDigitos ? 4 : 3;
+    if (normalized.length < minLen) {
       setSugerencias([]);
       return;
     }
     setSearching(true);
-    const results = await dataService.getBasePersonas(query);
+    const results = await dataService.buscarPersonasPorDocumento(raw, tipoDoc, 25);
     setSugerencias(results);
     setSearching(false);
-  }, [props.visitaSinDatosNino]);
+  }, [docBusqueda, tipoDoc, props.visitaSinDatosNino]);
 
-  const buscarAvanzada = useCallback(async () => {
+  const buscarDatosPersonales = useCallback(async () => {
     if (props.visitaSinDatosNino) return;
     setSearching(true);
-    const results = await dataService.buscarPersonasAvanzada({
-      inicialesNombre: iniNombre,
-      inicialesApellido: iniApellido,
-      fechaNacimiento: fechaBusqueda || props.fechaNacimiento,
-      documentoMadre: ciMadre || props.documentoMadre,
-    });
+    const results = await dataService.buscarPersonasDatosPersonales(
+      {
+        nombre1,
+        nombre2,
+        apellido1,
+        apellido2,
+        documentoMadrePadre: ciMadrePadre,
+        fechaNacimiento: fechaNacBusqueda,
+        sexo: sexoBusqueda || undefined,
+      },
+      25
+    );
     setSugerencias(results);
     setSearching(false);
-  }, [iniNombre, iniApellido, fechaBusqueda, ciMadre, props]);
-
-  const handleNombreChange = useCallback((value: string) => {
-    props.setNombre(value);
-    if (debounceTimer.current) clearTimeout(debounceTimer.current);
-    debounceTimer.current = setTimeout(() => buscar(value), 280);
-  }, [buscar, props]);
-
-  useEffect(() => () => {
-    if (debounceTimer.current) clearTimeout(debounceTimer.current);
-  }, []);
+  }, [
+    nombre1,
+    nombre2,
+    apellido1,
+    apellido2,
+    ciMadrePadre,
+    fechaNacBusqueda,
+    sexoBusqueda,
+    props.visitaSinDatosNino,
+  ]);
 
   const seleccionar = (p: PersonaBase) => {
     props.setNombre(p.nombre);
     props.setDocumento(p.documento);
     if (p.fecha_nacimiento) props.setFechaNacimiento(p.fecha_nacimiento);
     if (p.sexo) props.setSexo(p.sexo);
+    if (p.documento_madre && props.setDocumentoMadre) props.setDocumentoMadre(p.documento_madre);
     props.onPersonaSeleccionada(p);
     setSugerencias([]);
   };
@@ -99,17 +116,19 @@ export default function ChildDataSection(props: Props) {
 
   const listaSugerencias =
     sugerencias.length > 0 || searching ? (
-      <div className="mt-1 bg-card border rounded-lg shadow-lg max-h-44 overflow-y-auto z-20 relative">
+      <div className="mt-2 bg-card border rounded-lg shadow-lg max-h-44 overflow-y-auto z-20 relative">
         {searching && <p className="px-3 py-2 text-xs text-muted-foreground">Buscando...</p>}
-        {sugerencias.map((p) => (
+        {sugerencias.map((p, idx) => (
           <button
-            key={p.documento}
+            key={p.id ?? `${p.documento}-${idx}`}
             type="button"
             onClick={() => seleccionar(p)}
             className="w-full text-left px-3 py-2.5 text-sm hover:bg-accent border-b last:border-0"
           >
             <span className="font-medium">{p.nombre}</span>
-            <span className="text-muted-foreground ml-2">CI: {p.documento}</span>
+            <span className="text-muted-foreground ml-2">
+              {p.tipo_documento || 'CI'} {p.documento}
+            </span>
             {p.fecha_nacimiento && (
               <span className="block text-[10px] text-muted-foreground">FN: {p.fecha_nacimiento}</span>
             )}
@@ -134,85 +153,214 @@ export default function ChildDataSection(props: Props) {
         )}
 
         {!props.visitaSinDatosNino && (
-          <>
-            <div className="relative">
-              <label className="field-label">Buscar por nombre o CI</label>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground w-4 h-4" />
-                <input
-                  type="text"
-                  placeholder="Nombre, apellido o documento..."
-                  className="w-full h-11 pl-9 pr-3 rounded-lg border bg-background text-sm"
-                  onChange={(e) => handleNombreChange(e.target.value)}
-                  value={props.nombre}
-                />
-              </div>
+          <div className="rounded-xl border overflow-hidden shadow-sm">
+            <div className="bg-slate-600 text-white px-3 py-2.5 flex items-center gap-2 font-bold text-sm">
+              <Search className="w-4 h-4 shrink-0" aria-hidden />
+              Busca Persona
+            </div>
+            <div className="p-3 sm:p-4 space-y-3 bg-card">
+              {searchMode === 'documento' ? (
+                <>
+                  <div className="grid grid-cols-[minmax(0,7rem)_1fr] gap-2 gap-y-1 items-end">
+                    <div>
+                      <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide block mb-1">
+                        Tipo
+                      </label>
+                      <select
+                        value={tipoDoc}
+                        onChange={(e) => {
+                          setTipoDoc(e.target.value);
+                          setDocBusqueda('');
+                          setSugerencias([]);
+                        }}
+                        className="w-full h-10 px-2 rounded-lg border bg-background text-sm font-medium"
+                        title="Tipo de documento (catálogo nómina MRV)"
+                      >
+                        {TIPOS_DOCUMENTO_MRV.map((t) => (
+                          <option key={t.value} value={t.value}>
+                            {t.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide block mb-1">
+                        Documento
+                      </label>
+                      <input
+                        value={docBusqueda}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (tipoDocumentoSoloDigitos(tipoDoc)) {
+                            setDocBusqueda(v.replace(/\D/g, ''));
+                          } else {
+                            setDocBusqueda(v.toUpperCase().replace(/[^A-Z0-9-]/g, ''));
+                          }
+                        }}
+                        className="w-full h-10 px-3 rounded-lg border bg-background text-sm font-mono"
+                        placeholder={
+                          tipoDocumentoSoloDigitos(tipoDoc)
+                            ? 'Número sin puntos'
+                            : 'Número o código alfanumérico'
+                        }
+                        inputMode={tipoDocumentoSoloDigitos(tipoDoc) ? 'numeric' : 'text'}
+                        title="Número de documento"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end pt-1">
+                    <button
+                      type="button"
+                      onClick={() => void buscarPorDocumento()}
+                      className="h-10 px-4 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-900 font-bold text-sm flex items-center gap-2 transition-colors"
+                    >
+                      <Search className="w-4 h-4" />
+                      Buscar
+                    </button>
+                  </div>
+                  <hr className="border-t border-dotted border-muted-foreground/40" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchMode('personales');
+                      setSugerencias([]);
+                    }}
+                    className="w-full h-11 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-md transition-colors"
+                  >
+                    <User className="w-5 h-5 shrink-0" />
+                    Búsqueda por datos personales
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide block mb-1">
+                        Primer nombre
+                      </label>
+                      <input
+                        value={nombre1}
+                        onChange={(e) => setNombre1(e.target.value)}
+                        className="w-full h-10 px-2 rounded-lg border bg-background text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide block mb-1">
+                        Segundo nombre
+                      </label>
+                      <input
+                        value={nombre2}
+                        onChange={(e) => setNombre2(e.target.value)}
+                        className="w-full h-10 px-2 rounded-lg border bg-background text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide block mb-1">
+                        Primer apellido
+                      </label>
+                      <input
+                        value={apellido1}
+                        onChange={(e) => setApellido1(e.target.value)}
+                        className="w-full h-10 px-2 rounded-lg border bg-background text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide block mb-1">
+                        Segundo apellido
+                      </label>
+                      <input
+                        value={apellido2}
+                        onChange={(e) => setApellido2(e.target.value)}
+                        className="w-full h-10 px-2 rounded-lg border bg-background text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div className="sm:col-span-1">
+                      <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide block mb-1">
+                        Cédula madre/padre
+                      </label>
+                      <input
+                        value={ciMadrePadre}
+                        onChange={(e) => setCiMadrePadre(e.target.value.replace(/\D/g, ''))}
+                        className="w-full h-10 px-2 rounded-lg border bg-background text-sm"
+                        inputMode="numeric"
+                        placeholder="6–8 dígitos"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide block mb-1">
+                        Fecha de nacimiento
+                      </label>
+                      <input
+                        type="date"
+                        value={fechaNacBusqueda}
+                        onChange={(e) => setFechaNacBusqueda(e.target.value)}
+                        className="w-full h-10 px-2 rounded-lg border bg-background text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide block mb-1">
+                        Sexo
+                      </label>
+                      <select
+                        value={sexoBusqueda}
+                        onChange={(e) => setSexoBusqueda(e.target.value as 'M' | 'F' | '')}
+                        className="w-full h-10 px-2 rounded-lg border bg-background text-sm"
+                      >
+                        <option value="">—</option>
+                        <option value="M">M</option>
+                        <option value="F">F</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex justify-end pt-1">
+                    <button
+                      type="button"
+                      onClick={() => void buscarDatosPersonales()}
+                      className="h-10 px-4 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-900 font-bold text-sm flex items-center gap-2 transition-colors"
+                    >
+                      <Search className="w-4 h-4" />
+                      Buscar
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">
+                    Puede buscar con iniciales o fragmentos (p. ej. «Ju» y «P») sin completar todos los campos; cada valor debe
+                    coincidir con el inicio de alguna palabra del nombre en padrón.
+                  </p>
+                  <hr className="border-t border-dotted border-muted-foreground/40" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchMode('documento');
+                      setSugerencias([]);
+                    }}
+                    className="w-full h-11 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-md transition-colors"
+                  >
+                    <CreditCard className="w-5 h-5 shrink-0" />
+                    Búsqueda por documento
+                  </button>
+                </>
+              )}
               {listaSugerencias}
             </div>
+          </div>
+        )}
 
-            <button
-              type="button"
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              className="w-full flex items-center justify-center gap-2 h-9 rounded-lg border border-dashed text-xs font-bold text-primary hover:bg-primary/5"
-            >
-              <Filter className="w-3.5 h-3.5" />
-              {showAdvanced ? 'Ocultar búsqueda avanzada' : 'Búsqueda avanzada (iniciales + FN / CI madre)'}
-            </button>
-
-            {showAdvanced && (
-              <div className="p-3 rounded-xl border bg-accent/20 space-y-2">
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="field-label">Iniciales nombre</label>
-                    <input
-                      value={iniNombre}
-                      onChange={(e) => setIniNombre(e.target.value)}
-                      className="w-full h-9 px-2 rounded-lg border bg-background text-sm uppercase"
-                      placeholder="Ej: JM"
-                      maxLength={8}
-                    />
-                  </div>
-                  <div>
-                    <label className="field-label">Iniciales apellido</label>
-                    <input
-                      value={iniApellido}
-                      onChange={(e) => setIniApellido(e.target.value)}
-                      className="w-full h-9 px-2 rounded-lg border bg-background text-sm uppercase"
-                      placeholder="Ej: PR"
-                      maxLength={8}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="field-label">Fecha de nacimiento</label>
-                  <input
-                    type="date"
-                    value={fechaBusqueda}
-                    onChange={(e) => setFechaBusqueda(e.target.value)}
-                    className="w-full h-9 px-2 rounded-lg border bg-background text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="field-label">CI de la madre</label>
-                  <input
-                    value={ciMadre}
-                    onChange={(e) => setCiMadre(e.target.value.replace(/\D/g, ''))}
-                    className="w-full h-9 px-2 rounded-lg border bg-background text-sm"
-                    inputMode="numeric"
-                    placeholder="6-8 dígitos"
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void buscarAvanzada()}
-                  className="w-full h-10 rounded-lg bg-primary text-primary-foreground text-sm font-bold"
-                >
-                  Buscar en RVe
-                </button>
-                {listaSugerencias}
-              </div>
-            )}
-          </>
+        {!props.visitaSinDatosNino && (
+          <div>
+            <label className="field-label flex items-center gap-1">
+              Nombre completo del niño/a <span className="text-destructive font-bold">*</span>
+            </label>
+            <input
+              type="text"
+              value={props.nombre}
+              onChange={(e) => props.setNombre(e.target.value)}
+              className="w-full h-11 px-3 rounded-lg border bg-background text-sm"
+              placeholder="Apellidos y nombres según documento"
+              title="Nombre completo"
+            />
+          </div>
         )}
 
         <div>
@@ -227,7 +375,6 @@ export default function ChildDataSection(props: Props) {
             }`}
             placeholder={props.sinDocumento ? 'TMP-XXX00-XXXXX (editable)' : 'Número de CI'}
             inputMode={props.sinDocumento ? 'text' : 'numeric'}
-            disabled={!props.sinDocumento && false}
           />
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
@@ -268,9 +415,11 @@ export default function ChildDataSection(props: Props) {
         </div>
 
         {props.fechaNacimiento && (
-          <div className={`px-3 py-2 rounded-lg text-sm font-semibold flex items-center gap-1.5 ${
-            props.edadValida ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'
-          }`}>
+          <div
+            className={`px-3 py-2 rounded-lg text-sm font-semibold flex items-center gap-1.5 ${
+              props.edadValida ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'
+            }`}
+          >
             {props.edadValida ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />} {props.edadTexto}
           </div>
         )}
@@ -307,19 +456,25 @@ export default function ChildDataSection(props: Props) {
               placeholder="CI de la madre"
               inputMode="numeric"
             />
-            {props.nombreMadre && (
-              <p className="text-xs text-muted-foreground">Nombre: {props.nombreMadre}</p>
-            )}
+            {props.nombreMadre && <p className="text-xs text-muted-foreground">Nombre: {props.nombreMadre}</p>}
           </div>
         )}
 
         {(props.regionNombre || props.barrio) && (
           <div className="rounded-lg border bg-primary/5 p-3 text-xs space-y-1">
             <p className="font-semibold">Ubicación</p>
-            <p className="text-muted-foreground"><b>Región:</b> {props.regionNombre || '—'}</p>
-            <p className="text-muted-foreground"><b>Distrito:</b> {props.distritoNombre || '—'}</p>
-            <p className="text-muted-foreground"><b>Servicio:</b> {props.servicioNombre || '—'}</p>
-            <p className="text-muted-foreground"><b>Barrio:</b> {props.barrio || '—'}</p>
+            <p className="text-muted-foreground">
+              <b>Región:</b> {props.regionNombre || '—'}
+            </p>
+            <p className="text-muted-foreground">
+              <b>Distrito:</b> {props.distritoNombre || '—'}
+            </p>
+            <p className="text-muted-foreground">
+              <b>Servicio:</b> {props.servicioNombre || '—'}
+            </p>
+            <p className="text-muted-foreground">
+              <b>Barrio:</b> {props.barrio || '—'}
+            </p>
           </div>
         )}
       </div>

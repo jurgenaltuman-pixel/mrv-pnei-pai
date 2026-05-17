@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, lazy, Suspense } from 'react';
+import { useState, useMemo, useEffect, useCallback, lazy, Suspense } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRole } from '@/hooks/useRole';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
@@ -17,7 +17,7 @@ import { isFechaEnCampanaCvs } from '@/lib/mrv-constants';
 import { isMrvCvsTerrenoCompleto } from '@/lib/mrv-cvs-flow';
 import type { FuenteVerificacion, AccionTomada } from '@/lib/mrv-constants';
 import { acumularJornada, getJornadaStats, type JornadaStats } from '@/lib/jornada-storage';
-import { MrvAppLogo } from '@/components/branding/MrvAppLogo';
+import { CampaignAppHeader } from '@/components/branding/CampaignAppHeader';
 import { PageSkeleton, MapSkeleton } from '@/components/mrv/PageSkeleton';
 
 const DashboardView = lazy(() => import('@/components/mrv/DashboardView'));
@@ -27,7 +27,7 @@ import type { ContadorViviendas } from '@/types/mrv';
 import { dataService, type PersonaBase } from '@/services/dataService';
 import { useGeolocation } from '@/hooks/useGeolocation';
 import { useToast } from '@/hooks/use-toast';
-import { Save, Loader2, LogOut, WifiOff } from 'lucide-react';
+import { Save, Loader2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 
 function calcularEdad(fechaNac: string): { texto: string; valida: boolean } {
@@ -283,24 +283,24 @@ export default function MainApp() {
     setServicioManual(persona.servicio_salud || '');
   };
 
-  const generarDocumentoTemporal = () => {
+  const generarDocumentoTemporal = useCallback(() => {
     const reg = regiones.find((r) => r.id === regionId);
-    const dis = distritos.find((d) => d.id === distritoId);
-    setDocumento(generarCodigoTemporalRve(reg?.codigo ?? undefined, dis?.nombre));
-  };
+    const disCode = distritoId != null ? String(distritoId % 100).padStart(2, '0') : undefined;
+    setDocumento(generarCodigoTemporalRve(reg?.codigo ?? undefined, disCode));
+  }, [regionId, distritoId, regiones]);
 
   useEffect(() => {
     if (user) setJornadaStats(getJornadaStats(user.id));
   }, [user?.id]);
 
+  /** Solo al activar/desactivar «sin CI»: al activar genera propuesta RVe; al desactivar limpia TMP. No regenera al editar el campo. */
   useEffect(() => {
-    if (sinDocumento && !documento.startsWith('TMP-')) {
+    if (sinDocumento) {
       generarDocumentoTemporal();
+    } else {
+      setDocumento((d) => (d.trim().startsWith('TMP-') ? '' : d));
     }
-    if (!sinDocumento && documento.startsWith('TMP-')) {
-      setDocumento('');
-    }
-  }, [sinDocumento]);
+  }, [sinDocumento, generarDocumentoTemporal]);
 
   const fechaSprValida = useMemo(() => isFechaEnCampanaCvs(fechaSpr), [fechaSpr]);
 
@@ -613,32 +613,7 @@ export default function MainApp() {
 
   return (
     <div className="min-h-dvh bg-background pb-app">
-      <header className="bg-primary text-primary-foreground px-3 sm:px-4 py-2.5 sm:py-3 flex items-center gap-2 sm:gap-3 sticky top-0 z-40 shadow-lg safe-area-top">
-        <div className="h-10 w-10 rounded-xl bg-white/95 shadow-sm flex items-center justify-center flex-shrink-0">
-          <MrvAppLogo className="h-8 w-8 shrink-0" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-bold tracking-tight truncate">MRV — CVS Sarampión 2026</div>
-          <div className="text-xs opacity-80 truncate flex items-center gap-1.5">
-            {user?.nombre}
-            {!isOnline && <WifiOff className="w-3 h-3 text-yellow-300" />}
-            {pendingCount > 0 && <span className="bg-yellow-400/20 text-yellow-200 px-1.5 py-0.5 rounded text-[10px] font-bold">{pendingCount} pend.</span>}
-          </div>
-        </div>
-        {!isOnline && (
-          <div className="flex items-center gap-1 text-[10px] bg-yellow-500/20 text-yellow-200 px-2 py-1 rounded-lg font-medium flex-shrink-0">
-            <WifiOff className="w-3 h-3" /> Sin conexión
-          </div>
-        )}
-        <button
-          onClick={logout}
-          className="flex items-center gap-1.5 text-xs bg-white/15 backdrop-blur-sm px-2.5 sm:px-3 py-2 rounded-lg font-semibold active:scale-95 transition-transform hover:bg-white/25 flex-shrink-0"
-          aria-label="Cerrar sesión"
-        >
-          <LogOut className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">Salir</span>
-        </button>
-      </header>
+      <CampaignAppHeader user={user} isOnline={isOnline} pendingCount={pendingCount} onLogout={logout} />
 
       <div className="max-w-6xl mx-auto">
         {tab === 'registro' && (

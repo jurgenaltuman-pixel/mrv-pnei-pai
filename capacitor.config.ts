@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'py.gov.mspbs.mrv2026',
-  appName: 'MRV 2026',
+  appName: 'M R V PNEI',
   webDir: 'dist-vite',
   server: {
     androidScheme: 'https',

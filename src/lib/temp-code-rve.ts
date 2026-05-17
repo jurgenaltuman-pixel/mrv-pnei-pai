@@ -1,4 +1,4 @@
-/** Código temporal alineado a convención RVe (editable por el encuestador) */
+/** Código temporal / documento sustituto según lineamientos RVe (editable en app). */
 
 export function generarCodigoTemporalRve(regionCodigo?: string, distritoCodigo?: string): string {
   const reg = (regionCodigo || 'XX').replace(/\W/g, '').slice(0, 3).toUpperCase();
@@ -11,6 +11,11 @@ export function esCodigoTemporal(doc: string): boolean {
   return /^TMP-/i.test(doc.trim());
 }
 
+/**
+ * Valida formato de código temporal o documento numérico provisional.
+ * - Prefijo TMP- + bloque alfanumérico + guion + sufijo (propuesta autogenerada).
+ * - O CI numérica 6–8 dígitos cuando aplica registro sin formato TMP.
+ */
 export function validarFormatoCodigoTemporal(doc: string): boolean {
   const t = doc.trim();
   if (!t) return false;

@@ -52,6 +52,17 @@ export interface BusquedaAvanzadaFiltros {
   documentoMadre?: string;
 }
 
+/** Búsqueda nominal (campos tipo planilla / RVe). */
+export interface BusquedaDatosPersonalesFiltros {
+  nombre1?: string;
+  nombre2?: string;
+  apellido1?: string;
+  apellido2?: string;
+  documentoMadrePadre?: string;
+  fechaNacimiento?: string;
+  sexo?: string;
+}
+
 export type BusquedaAvanzadaFiltrosInput = BusquedaAvanzadaFiltros;
 
 function composeMotivoDetalle(reg: Omit<RegistroMRV, 'id' | 'fecha_hora'>): string | null {
@@ -93,6 +104,39 @@ function normalizeText(text: string | null | undefined): string {
     .replace(/[\u0300-\u036f]/g, '')
     .trim()
     .toLowerCase();
+}
+
+function dedupePersonasPorDocumento(rows: PersonaBase[]): PersonaBase[] {
+  const seen = new Set<string>();
+  const out: PersonaBase[] = [];
+  for (const r of rows) {
+    const k = (r.documento || '').trim();
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(r);
+  }
+  return out;
+}
+
+/**
+ * Búsqueda por datos personales: acepta fragmentos o iniciales por campo
+ * (p. ej. «Ju» + «P» sin completar apellidos). Cada parte debe coincidir con
+ * alguna palabra del nombre completo (inicio de palabra si 1 carácter; prefijo o subcadena si ≥2).
+ */
+function nombreCoincidePartes(nombreCompleto: string, partesNormalizadas: string[]): boolean {
+  if (partesNormalizadas.length === 0) return false;
+  const hay = normalizeText(nombreCompleto);
+  const words = hay.split(/\s+/).filter(Boolean);
+  for (const p of partesNormalizadas) {
+    if (!p) continue;
+    if (p.length >= 2) {
+      const ok = words.some((w) => w.startsWith(p)) || hay.includes(p);
+      if (!ok) return false;
+    } else {
+      if (!words.some((w) => w.startsWith(p))) return false;
+    }
+  }
+  return true;
 }
 
 function normalizeTipoVivienda(value: string | null | undefined): RegistroMRV['tipo_vivienda'] {
@@ -243,6 +287,135 @@ export const dataService = {
       return results.slice(0, maxResults);
     } catch (err) {
       console.error('Validación en búsqueda:', err);
+      return [];
+    }
+  },
+
+  /**
+   * Búsqueda por documento (número + tipo opcional en base_personas).
+   */
+  async buscarPersonasPorDocumento(
+    documentoRaw: string,
+    tipoDocumento = 'CI',
+    limit = 25,
+    opts?: { signal?: AbortSignal }
+  ): Promise<PersonaBase[]> {
+    const tipo = (tipoDocumento || 'CI').trim().toUpperCase();
+    const soloDigitos = tipo === 'CI';
+    const doc = soloDigitos
+      ? documentoRaw.replace(/\D/g, '').trim()
+      : documentoRaw.trim().replace(/\s+/g, '').toUpperCase();
+    const minLen = soloDigitos ? 4 : 3;
+    if (!doc || doc.length < minLen) return [];
+    try {
+      let q = supabase
+        .from('base_personas')
+        .select('id, nombre, tipo_documento, documento, fecha_nacimiento, sexo, region_sanitaria, distrito, servicio_salud, documento_madre, nombre_madre')
+        .eq('documento', doc);
+      if (tipo) {
+        q = q.ilike('tipo_documento', tipo);
+      }
+      let request = q.limit(limit);
+      if (opts?.signal) request = request.abortSignal(opts.signal);
+      const { data, error } = await request;
+      if (error || !data?.length) {
+        return this.getBasePersonas(doc, { limit, signal: opts?.signal });
+      }
+      return data as PersonaBase[];
+    } catch {
+      return this.getBasePersonas(soloDigitos ? documentoRaw.replace(/\D/g, '') : documentoRaw.trim(), {
+        limit,
+        signal: opts?.signal,
+      });
+    }
+  },
+
+  /**
+   * Búsqueda para registro de usuario: prioriza CI exacto (sin letras en la consulta);
+   * por nombre exige ≥3 caracteres para menos ruido. Resultados deduplicados por documento.
+   */
+  async buscarPersonasAltaUsuario(
+    query: string,
+    options?: { limit?: number; signal?: AbortSignal }
+  ): Promise<PersonaBase[]> {
+    const trimmed = (query || '').trim();
+    const signal = options?.signal;
+    const limit = Math.min(20, Math.max(6, options?.limit ?? 15));
+    if (!trimmed) return [];
+
+    const digitRun = trimmed.replace(/\D/g, '');
+    const hasLetter = /[A-Za-zÁÉÍÓÚáéíóúÑñ]/.test(trimmed);
+
+    if (!hasLetter && digitRun.length >= 4) {
+      const rows = await this.buscarPersonasPorDocumento(digitRun, 'CI', limit, { signal });
+      return dedupePersonasPorDocumento(rows);
+    }
+
+    if (normalizeText(trimmed).length < 3) return [];
+    const rows = await this.getBasePersonas(trimmed, { limit, signal });
+    return dedupePersonasPorDocumento(rows);
+  },
+
+  /**
+   * Búsqueda por datos personales (nombre/apellidos, CI madre/padre, fecha nac., sexo).
+   * `nombre` en BD es un solo campo: se exige coincidencia aproximada por tokens.
+   */
+  async buscarPersonasDatosPersonales(filtros: BusquedaDatosPersonalesFiltros, limit = 25): Promise<PersonaBase[]> {
+    const madre = filtros.documentoMadrePadre?.replace(/\D/g, '').trim();
+    const fecha = filtros.fechaNacimiento?.trim();
+    const sexo = filtros.sexo?.trim().toUpperCase();
+    const parts = [filtros.nombre1, filtros.nombre2, filtros.apellido1, filtros.apellido2]
+      .map((s) => normalizeText(s))
+      .filter((s) => s.length >= 1);
+    const hasServerFilter =
+      (madre && madre.length >= 4) || Boolean(fecha) || sexo === 'M' || sexo === 'F';
+
+    if (parts.length > 0 && !hasServerFilter) {
+      const q = [filtros.nombre1, filtros.nombre2, filtros.apellido1, filtros.apellido2]
+        .map((s) => (s || '').trim())
+        .filter(Boolean)
+        .join(' ');
+      if (q.length < 1) return [];
+      const broad = await this.getBasePersonas(q, { limit: 80 });
+      return broad.filter((row) => nombreCoincidePartes(row.nombre, parts)).slice(0, limit);
+    }
+
+    if (!hasServerFilter && parts.length === 0) return [];
+
+    try {
+      let q = supabase
+        .from('base_personas')
+        .select('id, nombre, tipo_documento, documento, fecha_nacimiento, sexo, region_sanitaria, distrito, servicio_salud, documento_madre, nombre_madre');
+
+      if (madre && madre.length >= 4) {
+        q = q.eq('documento_madre', madre);
+      }
+      if (fecha) {
+        q = q.eq('fecha_nacimiento', fecha);
+      }
+      if (sexo === 'M' || sexo === 'F') {
+        q = q.eq('sexo', sexo);
+      }
+
+      const { data, error } = await q.limit(120);
+      if (error || !data?.length) return [];
+
+      let results = data as PersonaBase[];
+      if (parts.length > 0) {
+        results = results.filter((row) => nombreCoincidePartes(row.nombre, parts));
+      }
+
+      const seen = new Set<string>();
+      return results
+        .filter((r) => {
+          const k = r.documento || '';
+          if (!k || seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        })
+        .slice(0, limit);
+    } catch (err) {
+      console.error('buscarPersonasDatosPersonales:', err);
       return [];
     }
   },

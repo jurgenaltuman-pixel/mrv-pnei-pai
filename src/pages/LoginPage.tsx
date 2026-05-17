@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { MrvAppLogo } from '@/components/branding/MrvAppLogo';
 import { useAuth } from '@/contexts/AuthContext';
 import { dataService } from '@/services/dataService';
+import { APP_TITLE_PRIMARY, APP_CAMPAIGN_TAG } from '@/lib/app-branding';
 import { LogIn, UserPlus, Mail, Lock, User, Shield, Activity, AtSign, Search, AlertCircle, CheckCircle2, X, Eye, EyeOff } from 'lucide-react';
 
 interface UserSuggestion {
@@ -32,6 +33,14 @@ export default function LoginPage() {
   const debounceTimer = useRef<ReturnType<typeof setTimeout>>();
   const suggestionsRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  const minCharsForSignupSearch = (raw: string) => {
+    const t = raw.trim();
+    const digits = t.replace(/\D/g, '');
+    const hasLetter = /[A-Za-zÁÉÍÓÚáéíóúÑñ]/.test(t);
+    if (!hasLetter && digits.length > 0) return 4;
+    return 3;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,22 +73,23 @@ export default function LoginPage() {
   const searchUsers = async (query: string) => {
     const trimmedQuery = query.trim();
     setSearchError('');
-    
-    if (trimmedQuery.length < 2) {
+
+    const minLen = minCharsForSignupSearch(trimmedQuery);
+    if (trimmedQuery.length < minLen) {
       setSuggestions([]);
       setLastSearchedQuery('');
       return;
     }
-    
+
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
     abortControllerRef.current = new AbortController();
-    
+
     setSearchingUsers(true);
     try {
-      const rows = await dataService.getBasePersonas(trimmedQuery, {
-        limit: 12,
+      const rows = await dataService.buscarPersonasAltaUsuario(trimmedQuery, {
+        limit: 15,
         signal: abortControllerRef.current.signal,
       });
 
@@ -109,19 +119,20 @@ export default function LoginPage() {
   const handleSearchChange = (value: string) => {
     setSearchQuery(value);
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
-    
+
     const trimmed = value.trim();
-    if (trimmed.length < 2) {
+    const minLen = minCharsForSignupSearch(trimmed);
+    if (trimmed.length < minLen) {
       setSuggestions([]);
       setLastSearchedQuery('');
       return;
     }
 
     setLastSearchedQuery('');
-    const debounceDelay = /^\d+$/.test(trimmed) ? 180 : 280;
-    
+    const debounceDelay = minCharsForSignupSearch(trimmed) === 4 && /^\d[\d\s.]*$/.test(trimmed) ? 90 : 200;
+
     debounceTimer.current = setTimeout(() => {
-      searchUsers(value);
+      void searchUsers(value);
     }, debounceDelay);
   };
 
@@ -170,12 +181,12 @@ export default function LoginPage() {
               <Activity className="w-3.5 h-3.5 text-primary" />
             </div>
           </div>
-          <h1 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight leading-tight drop-shadow-sm px-2">
-            Monitoreo Rápido de Vacunados
+          <h1 className="text-lg sm:text-xl font-extrabold text-white tracking-tight leading-snug drop-shadow-sm px-1">
+            {APP_TITLE_PRIMARY}
           </h1>
           <div className="mt-3 inline-flex items-center gap-1.5 bg-white/15 backdrop-blur-sm text-white/90 px-3.5 py-1.5 rounded-full text-xs font-bold">
             <Shield className="w-3.5 h-3.5" />
-            CVS Sarampión / Rubéola 2026
+            {APP_CAMPAIGN_TAG}
           </div>
         </div>
 
@@ -232,11 +243,11 @@ export default function LoginPage() {
                     onChange={e => handleSearchChange(e.target.value)}
                     disabled={isUserSelected}
                     className={`auth-input pr-24 ${isUserSelected ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    placeholder="Escriba CI o nombre (mínimo 2 caracteres)..." 
+                    placeholder="CI (mín. 4 dígitos) o apellido/nombre (mín. 3 letras)…"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
-                        searchUsers(searchQuery);
+                        void searchUsers(searchQuery);
                       }
                     }}
                   />
@@ -244,7 +255,7 @@ export default function LoginPage() {
                     {!isUserSelected && searchQuery && (
                       <button 
                         type="button" 
-                        onClick={() => searchUsers(searchQuery)}
+                        onClick={() => void searchUsers(searchQuery)}
                         className="p-2 hover:bg-primary/10 rounded-lg transition-colors text-primary font-semibold text-sm"
                         title="Buscar"
                       >
@@ -271,7 +282,7 @@ export default function LoginPage() {
                     >
                       {suggestions.map((user) => (
                         <button
-                          key={user.documento}
+                          key={`${user.documento}-${user.nombre}`}
                           type="button"
                           onClick={() => selectUser(user)}
                           className="w-full px-4 py-3 hover:bg-primary/10 text-left border-b last:border-b-0 transition-colors"
@@ -323,21 +334,25 @@ export default function LoginPage() {
                   </div>
                 )}
 
-                {searchQuery.trim().length >= 2 && lastSearchedQuery === searchQuery.trim() && suggestions.length === 0 && !searchingUsers && !isUserSelected && !searchError && (
+                {searchQuery.trim().length >= minCharsForSignupSearch(searchQuery) && lastSearchedQuery === searchQuery.trim() && suggestions.length === 0 && !searchingUsers && !isUserSelected && !searchError && (
                   <div className="mt-2 p-3 bg-amber-50 rounded-lg border border-amber-200 flex gap-2 text-xs">
                     <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
                     <div className="flex-1">
                       <p className="font-semibold text-amber-800">⚠️ No encontrado</p>
-                      <p className="text-amber-700">El valor "{searchQuery.trim()}" no existe. Prueba CI completo o parte del nombre y apellido (ej. "pérez juan").</p>
-                      <p className="text-amber-600 mt-1 font-semibold">💡 Tip: Presiona Enter o haz click en 🔍 para buscar manualmente</p>
+                      <p className="text-amber-700">No hay coincidencias para «{searchQuery.trim()}». Verificá el CI completo (sin letras) o escribí al menos 3 letras del apellido o nombre.</p>
+                      <p className="text-amber-600 mt-1 font-semibold">💡 Tip: Enter o 🔍 para buscar de nuevo</p>
                     </div>
                   </div>
                 )}
-                
-                {searchQuery.length > 0 && searchQuery.length < 1 && (
+
+                {searchQuery.trim().length > 0 && searchQuery.trim().length < minCharsForSignupSearch(searchQuery) && (
                   <div className="mt-2 p-2 bg-blue-50 rounded-lg border border-blue-200 flex gap-2 text-xs">
                     <Search className="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" />
-                    <p className="text-blue-800">Escribe para buscar usuarios</p>
+                    <p className="text-blue-800">
+                      {minCharsForSignupSearch(searchQuery) === 4
+                        ? 'Para CI: escribí al menos 4 dígitos (se ignoran puntos).'
+                        : 'Para nombre: al menos 3 letras para una búsqueda precisa.'}
+                    </p>
                   </div>
                 )}
               </div>

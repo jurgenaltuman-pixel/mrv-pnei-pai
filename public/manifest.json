@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "MRV — CVS Sarampión 2026",
-  "short_name": "MRV 2026",
-  "description": "Monitoreo Rápido de Vacunados — registro nominal en terreno con soporte offline",
+  "name": "M R V — PNEI y PAI — MSPBS",
+  "short_name": "M R V PNEI",
+  "description": "M R V — PNEI y PAI — MSPBS · registro nominal en terreno con soporte offline",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

@@ -151,7 +151,7 @@ export default function DashboardView() {
     <div className="p-4 pb-24 max-w-4xl mx-auto space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-xl font-black text-foreground tracking-tight">Dashboard MRV</h2>
+          <h2 className="text-xl font-black text-foreground tracking-tight">Panel · M R V (PNEI / PAI)</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
             {registrosFiltrados.length} registros · {conGps} con GPS
             {isFetching && ' · actualizando…'}

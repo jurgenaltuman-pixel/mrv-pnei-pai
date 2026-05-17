@@ -37,7 +37,7 @@ interface NominalRow {
   documento: string;
   fecha_nacimiento: string;
   sexo: string;
-  estado_vacuna: string;
+  estado_vacunacion: string;
   motivo: string | null;
   tipo_vivienda?: string | null;
   esquema_completo?: boolean | null;
@@ -103,6 +103,28 @@ function normalizeHeader(value: string) {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, '_');
+}
+
+/** Parte nombre completo para columnas tipo nómina (nombre1…apellido2). */
+function splitNombreNomina(nombre: string): { n1: string; n2: string; a1: string; a2: string } {
+  const p = nombre.trim().split(/\s+/).filter(Boolean);
+  if (p.length === 0) return { n1: '', n2: '', a1: '', a2: '' };
+  if (p.length === 1) return { n1: p[0], n2: '', a1: '', a2: '' };
+  if (p.length === 2) return { n1: p[0], n2: '', a1: p[1], a2: '' };
+  if (p.length === 3) return { n1: p[0], n2: '', a1: p[1], a2: p[2] };
+  return { n1: p[0], n2: p[1], a1: p[p.length - 2], a2: p[p.length - 1] };
+}
+
+function edadAniosMesesDesdeFn(fechaIso: string | null | undefined): { anos: number | ''; meses: number | '' } {
+  if (!fechaIso) return { anos: '', meses: '' };
+  const d = new Date(`${fechaIso}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return { anos: '', meses: '' };
+  const hoy = new Date();
+  let meses = (hoy.getFullYear() - d.getFullYear()) * 12 + (hoy.getMonth() - d.getMonth());
+  if (hoy.getDate() < d.getDate()) meses -= 1;
+  if (meses < 0) return { anos: '', meses: '' };
+  const anos = Math.floor(meses / 12);
+  return { anos, meses: meses % 12 };
 }
 
 export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { isSuperAdmin?: boolean; isAdmin?: boolean }) {
@@ -490,25 +512,50 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
   };
 
   const exportNominalExcel = () => {
-    const rowsToExport = filteredNominal.map((r) => ({
-      Fecha: r.fecha_hora ? new Date(r.fecha_hora).toLocaleString('es-PY') : '',
-      Region: r.region || '',
-      Distrito: r.distrito || '',
-      Servicio: r.servicio || '',
-      Barrio: r.barrio || '',
-      Responsable: r.responsable || '',
-      Nombre: r.nombre || '',
-      Documento: r.documento || '',
-      Fecha_Nacimiento: r.fecha_nacimiento || '',
-      Sexo: r.sexo || '',
-      Estado: r.estado_vacunacion || '',
-      Motivo: r.motivo || '',
-      Tipo_Vivienda: r.tipo_vivienda || '',
-    }));
+    const rowsToExport = filteredNominal.map((r) => {
+      const sp = splitNombreNomina(r.nombre || '');
+      const { anos, meses } = edadAniosMesesDesdeFn(r.fecha_nacimiento);
+      return {
+        id_personas: r.id,
+        tipo_documento: 'CI',
+        documento: r.documento || '',
+        nombre1: sp.n1,
+        nombre2: sp.n2,
+        apellido1: sp.a1,
+        apellido2: sp.a2,
+        fecha_nacimiento: r.fecha_nacimiento || '',
+        edad_anos: anos === '' ? '' : anos,
+        edad_en_meses: meses === '' ? '' : meses,
+        sexo: r.sexo || '',
+        telefono: '',
+        domicilio: '',
+        madre_documento: '',
+        madre_nombre1: '',
+        madre_nombre2: '',
+        madre_apellido1: '',
+        madre_apellido2: '',
+        region_sanitaria: r.region || '',
+        departamento: '',
+        municipio: r.distrito || '',
+        barrio: r.barrio || '',
+        servicio_salud: r.servicio || '',
+        fecha_registro_mrv: r.fecha_hora ? new Date(r.fecha_hora).toLocaleString('es-PY') : '',
+        estado_vacunacion: r.estado_vacunacion || '',
+        motivo_mrv: r.motivo || '',
+        tipo_vivienda: r.tipo_vivienda || '',
+        esquema_completo:
+          r.esquema_completo === null || r.esquema_completo === undefined
+            ? ''
+            : r.esquema_completo
+              ? 'Sí'
+              : 'No',
+        responsable_visita: r.responsable || '',
+      };
+    });
     const ws = XLSX.utils.json_to_sheet(rowsToExport);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'ReporteNominal');
-    XLSX.writeFile(wb, `Reporte_Nominal_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, 'NominalMRV');
+    XLSX.writeFile(wb, `Nominal_MRV_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   const searchPersonaByCi = async (ci: string) => {
@@ -959,7 +1006,7 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
     <div className="p-4 pb-24 max-w-lg mx-auto space-y-4">
       <h2 className="text-xl font-black flex items-center gap-2">
         <Users className="w-6 h-6 text-primary" />
-        Administración MRV
+        Administración · M R V (PNEI / PAI)
       </h2>
       <p className="text-xs text-muted-foreground -mt-2">{profiles.length} usuarios · {nominal.length} registros</p>
 
