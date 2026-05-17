@@ -3,9 +3,20 @@
 declare const self: ServiceWorkerGlobalScope;
 
 /** Bump para forzar activate y limpiar lógica vieja (clone roto). */
-const CACHE_NAME = 'mrv-v10-static';
+const CACHE_NAME = 'mrv-v11-static';
 
-const URLS_TO_CACHE = ['/manifest.json', '/robots.txt', '/logo-mrv.png', '/icon-192.png', '/icon-512.png', '/favicon.png'];
+const URLS_TO_CACHE = [
+  '/manifest.json',
+  '/robots.txt',
+  '/logo-pnei-pai-mspbs.png',
+  '/logo-mrv.png',
+  '/brand-pai.png',
+  '/brand-paraguay-map.png',
+  '/brand-paraguay-seal.png',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/favicon.png',
+];
 
 const PRIVATE_PATHS = ['/auth/', '/profiles/', '/user_roles/', '/admin/', '/registros_vacunacion'];
 
