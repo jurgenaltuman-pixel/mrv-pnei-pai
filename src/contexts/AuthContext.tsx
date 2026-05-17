@@ -74,6 +74,9 @@ function normalizeAuthError(message: string): string {
   if (m.includes('rate') || m.includes('too many')) {
     return 'Demasiados intentos. Esperá unos minutos y volvé a intentar.';
   }
+  if (m.includes('secret api key') || m.includes('forbidden use of secret')) {
+    return 'La app o el sitio web fue compilado con la clave secreta de Supabase (no permitida en el cliente). Pedí al administrador que recompile usando la clave «anon» o «publishable» del proyecto (Settings → API), nunca la service_role ni sb_secret_.';
+  }
   if (m.includes('unauthorized') || m.includes('forbidden') || m.includes('not authorized')) {
     return 'No tenés permiso para esta operación. Si persiste, contactá soporte.';
   }
@@ -212,6 +215,9 @@ function coerceRpcEmail(data: unknown): string | null {
 function mapProfileLookupError(err: { message?: string; code?: string } | null): string | null {
   if (!err?.message) return null;
   const m = err.message.toLowerCase();
+  if (m.includes('secret api key') || m.includes('forbidden use of secret')) {
+    return 'La app fue compilada con la clave secreta de Supabase (no permitida en el móvil). Pedí al administrador que recompile el APK con la clave «anon» o «publishable» (Settings → API). Mientras tanto probá iniciar sesión escribiendo el correo completo.';
+  }
   if (m.includes('permission denied') || m.includes('policy') || m.includes('rls') || err.code === '42501') {
     return 'No se puede buscar el usuario desde la app (permisos de base de datos). Iniciá sesión con el correo electrónico completo o pedí al administrador que revise las políticas RLS de la tabla profiles.';
   }
