@@ -148,7 +148,7 @@ export default function DashboardView() {
   if (isLoading) return <PageSkeleton rows={5} />;
 
   return (
-    <div className="p-4 pb-24 max-w-4xl mx-auto space-y-4">
+    <div className="px-3 sm:px-4 pb-24 pt-2 max-w-6xl w-full mx-auto space-y-4 box-border">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-xl font-black text-foreground tracking-tight">Panel · M R V (PNEI / PAI)</h2>

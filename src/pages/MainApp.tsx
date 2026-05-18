@@ -18,6 +18,8 @@ import { isMrvCvsTerrenoCompleto } from '@/lib/mrv-cvs-flow';
 import type { FuenteVerificacion, AccionTomada } from '@/lib/mrv-constants';
 import { acumularJornada, getJornadaStats, type JornadaStats } from '@/lib/jornada-storage';
 import { CampaignAppHeader } from '@/components/branding/CampaignAppHeader';
+import { PadronOfflineBanner } from '@/components/mrv/PadronOfflineBanner';
+import { usePwaInstall } from '@/hooks/usePwaInstall';
 import { PageSkeleton, MapSkeleton } from '@/components/mrv/PageSkeleton';
 
 const DashboardView = lazy(() => import('@/components/mrv/DashboardView'));
@@ -88,6 +90,7 @@ export default function MainApp() {
   const { triggerRefresh } = useDataRefresh();
   const geo = useGeolocation();
   const { toast } = useToast();
+  const { canInstall, install } = usePwaInstall();
   const { regiones, distritos, servicios, getBarriosByDistrito } = useOrgStructure();
   const [tab, setTab] = useState('registro');
   const [pendingCount, setPendingCount] = useState(0);
@@ -612,10 +615,17 @@ export default function MainApp() {
   };
 
   return (
-    <div className="min-h-dvh bg-background pb-app">
-      <CampaignAppHeader user={user} isOnline={isOnline} pendingCount={pendingCount} onLogout={logout} />
+    <div className="flex flex-col flex-1 min-h-0 min-h-dvh w-full max-w-[100vw] bg-background overflow-x-hidden">
+      <CampaignAppHeader
+        user={user}
+        isOnline={isOnline}
+        pendingCount={pendingCount}
+        onLogout={logout}
+        pwaInstall={canInstall ? { canInstall: true, onInstall: install } : undefined}
+      />
+      <PadronOfflineBanner isOnline={isOnline} />
 
-      <div className="max-w-6xl mx-auto">
+      <main className="flex-1 min-h-0 w-full max-w-6xl mx-auto pb-app box-border">
         {tab === 'registro' && (
           <div className="p-3 lg:p-6">
             {user && <JornadaSummary stats={jornadaStats} />}
@@ -709,7 +719,7 @@ export default function MainApp() {
             <AdminPanel isSuperAdmin={isSuperAdmin} isAdmin={isAdmin} />
           </Suspense>
         )}
-      </div>
+      </main>
 
       <BottomNav active={tab} onChange={setTab} showAdmin={isAdmin} />
     </div>

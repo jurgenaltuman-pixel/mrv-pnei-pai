@@ -170,7 +170,7 @@ export default function LoginPage() {
   }, []);
 
   return (
-    <div className="auth-shell bg-gradient-to-b from-primary via-primary/95 to-primary/80 flex flex-col items-center justify-center p-4 sm:p-6 safe-area-top safe-area-bottom">
+    <div className="auth-shell bg-gradient-to-b from-primary via-primary/95 to-primary/80 flex flex-col flex-1 min-h-0 w-full items-center justify-center p-4 sm:p-6 safe-area-top safe-area-bottom">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="relative inline-block mb-5">

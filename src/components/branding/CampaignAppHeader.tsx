@@ -1,4 +1,4 @@
-import { LogOut, WifiOff, User } from 'lucide-react';
+import { LogOut, WifiOff, User, Download } from 'lucide-react';
 import { APP_TITLE_PRIMARY } from '@/lib/app-branding';
 
 export interface CampaignAppHeaderProps {
@@ -6,15 +6,17 @@ export interface CampaignAppHeaderProps {
   isOnline: boolean;
   pendingCount: number;
   onLogout: () => void;
+  /** Instalación PWA segura (solo HTTPS / localhost, si el navegador ofrece prompt). */
+  pwaInstall?: { canInstall: boolean; onInstall: () => void | Promise<void> };
 }
 
-const LOGO_SRC = `${import.meta.env.BASE_URL}logo-pnei-pai-mspbs.png`.replace(/\/{2,}/g, '/');
+const LOGO_SRC = `${import.meta.env.BASE_URL}logo-mrv-oficial.png`.replace(/\/{2,}/g, '/');
 
-/** Banner superior institucional: logo PNEI/PAI, título MSPBS y usuario. */
-export function CampaignAppHeader({ user, isOnline, pendingCount, onLogout }: CampaignAppHeaderProps) {
+/** Banner superior institucional: logo MRV, título MSPBS y usuario. */
+export function CampaignAppHeader({ user, isOnline, pendingCount, onLogout, pwaInstall }: CampaignAppHeaderProps) {
   return (
-    <header className="relative border-b border-sky-200/70 bg-gradient-to-b from-white via-sky-50/40 to-sky-100/30 text-slate-900 shadow-[0_4px_24px_-4px_rgba(15,23,42,0.12)] backdrop-blur-sm">
-      <div className="max-w-6xl mx-auto px-3 sm:px-5 py-2.5 sm:py-3 flex items-center gap-3 sm:gap-4">
+    <header className="sticky top-0 z-40 border-b border-sky-200/70 bg-gradient-to-b from-white via-sky-50/40 to-sky-100/30 text-slate-900 shadow-[0_4px_24px_-4px_rgba(15,23,42,0.12)] backdrop-blur-md safe-area-top">
+      <div className="max-w-6xl mx-auto px-3 sm:px-5 py-2 sm:py-3 flex items-center gap-2 sm:gap-4">
         <div className="shrink-0">
           <div className="h-12 w-12 sm:h-14 sm:w-14 rounded-full bg-white ring-2 ring-sky-200/90 shadow-md overflow-hidden flex items-center justify-center p-0.5">
             <img
@@ -64,6 +66,17 @@ export function CampaignAppHeader({ user, isOnline, pendingCount, onLogout }: Ca
               <WifiOff className="w-3.5 h-3.5 shrink-0" aria-hidden />
               <span className="hidden sm:inline">Sin conexión</span>
             </span>
+          )}
+          {pwaInstall?.canInstall && (
+            <button
+              type="button"
+              onClick={() => void pwaInstall.onInstall()}
+              className="flex items-center gap-1 text-[10px] sm:text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 px-2 sm:px-2.5 py-2 rounded-xl shadow-sm border border-emerald-900/20 active:scale-[0.98] transition-colors"
+              title="Instalar como aplicación (requiere HTTPS)"
+            >
+              <Download className="w-3.5 h-3.5 shrink-0" aria-hidden />
+              <span className="hidden sm:inline">Instalar</span>
+            </button>
           )}
           <button
             type="button"

@@ -10,7 +10,7 @@ export default function Index() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="flex flex-1 min-h-dvh w-full bg-background items-center justify-center">
         <div className="text-center">
           <Loader2 className="w-10 h-10 text-primary animate-spin mx-auto mb-3" />
           <p className="text-sm text-muted-foreground">Cargando...</p>

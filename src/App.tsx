@@ -36,11 +36,13 @@ const App = () => {
             <Toaster />
             <Sonner />
             <HashRouter>
-              <Routes>
-                <Route path="/" element={<Index />} />
-                <Route path="/admin/import-data" element={<ImportDataPage />} />
-                <Route path="*" element={<NotFound />} />
-              </Routes>
+              <div className="flex min-h-dvh w-full flex-1 flex-col">
+                <Routes>
+                  <Route path="/" element={<Index />} />
+                  <Route path="/admin/import-data" element={<ImportDataPage />} />
+                  <Route path="*" element={<NotFound />} />
+                </Routes>
+              </div>
             </HashRouter>
           </AuthProvider>
         </DataRefreshProvider>

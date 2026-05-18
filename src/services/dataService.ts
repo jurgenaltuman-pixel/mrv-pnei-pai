@@ -1,5 +1,44 @@
 import { supabase } from '@/integrations/supabase/client';
 import { SearchQuerySchema } from '@/lib/validation-schemas';
+import { mrvAppCache } from '@/services/mrvAppCache';
+import { mrvPadronIndexed } from '@/services/mrvPadronIndexed';
+
+function asPersonaRows(raw: unknown): PersonaBase[] {
+  if (!Array.isArray(raw)) return [];
+  const out: PersonaBase[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const o = item as Record<string, unknown>;
+    if (typeof o.documento !== 'string' || typeof o.nombre !== 'string') continue;
+    out.push({
+      id: typeof o.id === 'string' ? o.id : undefined,
+      nombre: o.nombre,
+      tipo_documento: String(o.tipo_documento ?? ''),
+      documento: o.documento,
+      fecha_nacimiento: (o.fecha_nacimiento as string | null) ?? null,
+      sexo: (o.sexo as string | null) ?? null,
+      region_sanitaria: (o.region_sanitaria as string | null) ?? null,
+      distrito: (o.distrito as string | null) ?? null,
+      servicio_salud: (o.servicio_salud as string | null) ?? null,
+      documento_madre: (o.documento_madre as string | null) ?? null,
+      nombre_madre: (o.nombre_madre as string | null) ?? null,
+    });
+  }
+  return out;
+}
+
+async function loadCachedPersonas(key: string): Promise<PersonaBase[]> {
+  const rows = await mrvAppCache.getPersonaSearch(key);
+  return asPersonaRows(rows);
+}
+
+function persistPersonasCache(key: string, rows: PersonaBase[]) {
+  if (rows.length > 0) void mrvAppCache.savePersonaSearch(key, rows);
+}
+
+function personaBaseQueryCacheKey(maxResults: number, normalized: string) {
+  return `base:${maxResults}:${normalized}`;
+}
 
 export interface PersonaBase {
   id?: string;
@@ -63,6 +102,21 @@ export interface BusquedaDatosPersonalesFiltros {
   sexo?: string;
 }
 
+function personalSearchCacheKey(filtros: BusquedaDatosPersonalesFiltros): string {
+  const pack = [
+    filtros.nombre1,
+    filtros.nombre2,
+    filtros.apellido1,
+    filtros.apellido2,
+    filtros.documentoMadrePadre,
+    filtros.fechaNacimiento,
+    filtros.sexo,
+  ]
+    .map((x) => (x || '').trim().toLowerCase())
+    .join('|');
+  return `pers:${pack}`;
+}
+
 export type BusquedaAvanzadaFiltrosInput = BusquedaAvanzadaFiltros;
 
 function composeMotivoDetalle(reg: Omit<RegistroMRV, 'id' | 'fecha_hora'>): string | null {
@@ -98,7 +152,7 @@ function escapeILike(value: string): string {
   return value.replace(/[\\%_]/g, '\\$&');
 }
 
-function normalizeText(text: string | null | undefined): string {
+export function normalizeText(text: string | null | undefined): string {
   return (text || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -123,7 +177,7 @@ function dedupePersonasPorDocumento(rows: PersonaBase[]): PersonaBase[] {
  * (p. ej. «Ju» + «P» sin completar apellidos). Cada parte debe coincidir con
  * alguna palabra del nombre completo (inicio de palabra si 1 carácter; prefijo o subcadena si ≥2).
  */
-function nombreCoincidePartes(nombreCompleto: string, partesNormalizadas: string[]): boolean {
+export function nombreCoincidePartes(nombreCompleto: string, partesNormalizadas: string[]): boolean {
   if (partesNormalizadas.length === 0) return false;
   const hay = normalizeText(nombreCompleto);
   const words = hay.split(/\s+/).filter(Boolean);
@@ -168,6 +222,20 @@ export const dataService = {
       if (!normalized) return [];
 
       const maxResults = Math.max(5, Math.min(options?.limit ?? 20, 50));
+      const pCacheKey = personaBaseQueryCacheKey(maxResults, normalized);
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        if (await mrvPadronIndexed.isReady()) {
+          const local = await mrvPadronIndexed.searchGeneral(normalized, {
+            maxResults,
+            isNumeric,
+            needleTokens,
+            normalize: normalizeText,
+          });
+          return local as PersonaBase[];
+        }
+        return await loadCachedPersonas(pCacheKey);
+      }
+
       const fetchCap = Math.min(80, maxResults * 4);
       const signal = options?.signal;
 
@@ -195,7 +263,11 @@ export const dataService = {
                 nombre_madre: null,
               }))
               .filter((p) => p.documento.length > 0);
-            if (mapped.length > 0) return mapped.slice(0, maxResults);
+            if (mapped.length > 0) {
+              const sliced = mapped.slice(0, maxResults);
+              persistPersonasCache(pCacheKey, sliced);
+              return sliced;
+            }
           }
         } catch {
           /* continuar con consulta directa */
@@ -241,7 +313,18 @@ export const dataService = {
 
       if (error) {
         console.error('Error en getBasePersonas:', error);
-        return [];
+        const cached = await loadCachedPersonas(pCacheKey);
+        if (cached.length) return cached;
+        if (await mrvPadronIndexed.isReady()) {
+          const local = await mrvPadronIndexed.searchGeneral(normalized, {
+            maxResults,
+            isNumeric,
+            needleTokens,
+            normalize: normalizeText,
+          });
+          return local as PersonaBase[];
+        }
+        return cached;
       }
 
       let results = (data || []) as PersonaBase[];
@@ -284,10 +367,29 @@ export const dataService = {
         return aNormal.localeCompare(bNormal);
       });
 
-      return results.slice(0, maxResults);
+      const out = results.slice(0, maxResults);
+      persistPersonasCache(pCacheKey, out);
+      return out;
     } catch (err) {
       console.error('Validación en búsqueda:', err);
-      return [];
+      const parsed = SearchQuerySchema.safeParse(typeof query === 'string' ? query : '');
+      if (!parsed.success) return [];
+      const norm = parsed.data.trim().slice(0, 60);
+      if (!norm) return [];
+      const maxRes = Math.max(5, Math.min(options?.limit ?? 20, 50));
+      const rawTokens = norm.split(/\s+/).map((t) => t.trim()).filter(Boolean);
+      const needleTokens = rawTokens.map((t) => normalizeText(t)).filter(Boolean);
+      const isNumeric = /^\d+$/.test(norm);
+      if (await mrvPadronIndexed.isReady()) {
+        const local = await mrvPadronIndexed.searchGeneral(norm, {
+          maxResults: maxRes,
+          isNumeric,
+          needleTokens,
+          normalize: normalizeText,
+        });
+        return local as PersonaBase[];
+      }
+      return await loadCachedPersonas(personaBaseQueryCacheKey(maxRes, norm));
     }
   },
 
@@ -307,6 +409,14 @@ export const dataService = {
       : documentoRaw.trim().replace(/\s+/g, '').toUpperCase();
     const minLen = soloDigitos ? 4 : 3;
     if (!doc || doc.length < minLen) return [];
+    const cacheKey = `doc:${tipo}:${doc}`;
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      if (await mrvPadronIndexed.isReady()) {
+        const local = await mrvPadronIndexed.searchByDocument(doc, tipo, limit);
+        return local as PersonaBase[];
+      }
+      return await loadCachedPersonas(cacheKey);
+    }
     try {
       let q = supabase
         .from('base_personas')
@@ -318,15 +428,28 @@ export const dataService = {
       let request = q.limit(limit);
       if (opts?.signal) request = request.abortSignal(opts.signal);
       const { data, error } = await request;
-      if (error || !data?.length) {
-        return this.getBasePersonas(doc, { limit, signal: opts?.signal });
+      if (!error && data?.length) {
+        const rows = data as PersonaBase[];
+        persistPersonasCache(cacheKey, rows);
+        return rows;
       }
-      return data as PersonaBase[];
+      if (await mrvPadronIndexed.isReady()) {
+        const local = await mrvPadronIndexed.searchByDocument(doc, tipo, limit);
+        if (local.length) {
+          persistPersonasCache(cacheKey, local as PersonaBase[]);
+          return local as PersonaBase[];
+        }
+      }
+      const fallback = await this.getBasePersonas(doc, { limit, signal: opts?.signal });
+      persistPersonasCache(cacheKey, fallback);
+      return fallback;
     } catch {
-      return this.getBasePersonas(soloDigitos ? documentoRaw.replace(/\D/g, '') : documentoRaw.trim(), {
+      const fallback = await this.getBasePersonas(soloDigitos ? documentoRaw.replace(/\D/g, '') : documentoRaw.trim(), {
         limit,
         signal: opts?.signal,
       });
+      persistPersonasCache(cacheKey, fallback);
+      return fallback;
     }
   },
 
@@ -364,6 +487,15 @@ export const dataService = {
     const madre = filtros.documentoMadrePadre?.replace(/\D/g, '').trim();
     const fecha = filtros.fechaNacimiento?.trim();
     const sexo = filtros.sexo?.trim().toUpperCase();
+    const pKey = personalSearchCacheKey(filtros);
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      if (await mrvPadronIndexed.isReady()) {
+        const local = await mrvPadronIndexed.searchDatosPersonales(filtros, nombreCoincidePartes, normalizeText, limit);
+        return local as PersonaBase[];
+      }
+      return await loadCachedPersonas(pKey);
+    }
+
     const parts = [filtros.nombre1, filtros.nombre2, filtros.apellido1, filtros.apellido2]
       .map((s) => normalizeText(s))
       .filter((s) => s.length >= 1);
@@ -377,7 +509,9 @@ export const dataService = {
         .join(' ');
       if (q.length < 1) return [];
       const broad = await this.getBasePersonas(q, { limit: 80 });
-      return broad.filter((row) => nombreCoincidePartes(row.nombre, parts)).slice(0, limit);
+      const out = broad.filter((row) => nombreCoincidePartes(row.nombre, parts)).slice(0, limit);
+      persistPersonasCache(pKey, out);
+      return out;
     }
 
     if (!hasServerFilter && parts.length === 0) return [];
@@ -398,7 +532,9 @@ export const dataService = {
       }
 
       const { data, error } = await q.limit(120);
-      if (error || !data?.length) return [];
+      if (error || !data?.length) {
+        return await loadCachedPersonas(pKey);
+      }
 
       let results = data as PersonaBase[];
       if (parts.length > 0) {
@@ -406,7 +542,7 @@ export const dataService = {
       }
 
       const seen = new Set<string>();
-      return results
+      const out = results
         .filter((r) => {
           const k = r.documento || '';
           if (!k || seen.has(k)) return false;
@@ -414,9 +550,11 @@ export const dataService = {
           return true;
         })
         .slice(0, limit);
+      persistPersonasCache(pKey, out);
+      return out;
     } catch (err) {
       console.error('buscarPersonasDatosPersonales:', err);
-      return [];
+      return await loadCachedPersonas(pKey);
     }
   },
 
@@ -619,72 +757,96 @@ export const dataService = {
   },
 
   async getRegistros(limit = 3000): Promise<RegistroMRV[]> {
-    const { data, error } = await supabase
-      .from('registros_vacunacion')
-      .select('*')
-      .order('fecha_hora', { ascending: false })
-      .limit(Math.max(100, Math.min(limit, 10000)));
-    if (error) { console.error('❌ Error en getRegistros:', error); return []; }
-    
-    const mapped = ((data || []) as any[]).map((row) => {
-      // Normalización estricta: solo 'vacunado' o 'no_vacunado' como string
-      let estado = row.estado_vacunacion;
-      if (row.esquema_completo === true) {
-        estado = 'vacunado';
-      }
-      if (typeof estado !== 'string' || estado !== 'vacunado') {
-        estado = 'no_vacunado';
-      }
-      return {
-        id: row.id,
-        user_id: row.user_id,
-        fecha_hora: row.fecha_hora,
-        region: row.region || '',
-        distrito: row.distrito || '',
-        servicio: row.servicio ?? null,
-        barrio: row.barrio ?? null,
-        responsable: row.responsable ?? null,
-        nombre: row.nombre || '',
-        documento: row.documento || '',
-        fecha_nacimiento: row.fecha_nacimiento || '',
-        edad: row.edad ?? null,
-        sexo: row.sexo || '',
-        libreta: row.libreta ?? false,
-        estado_vacuna: estado,
-        motivo: row.motivo ?? null,
-        latitud: row.latitud ?? null,
-        longitud: row.longitud ?? null,
-        tipo_vivienda: normalizeTipoVivienda(row.tipo_vivienda ?? null),
-        esquema_completo: row.esquema_completo ?? null,
-      };
-    }) as RegistroMRV[];
-    console.log('🟢 [getRegistros] Primeros registros normalizados:', mapped.slice(0, 3));
-    
-    // Debug: diagnóstico de estado_vacunacion
-    if (mapped.length > 0) {
-      const nullStates = mapped.filter(r => r.estado_vacuna === null);
-      const vacunados = mapped.filter(r => r.estado_vacuna === 'vacunado');
-      const noVacunados = mapped.filter(r => r.estado_vacuna === 'no_vacunado');
-      
-      console.log('getRegistros - Análisis de datos:', {
-        total: mapped.length,
-        vacunados: vacunados.length,
-        noVacunados: noVacunados.length,
-        conEstadoNull: nullStates.length,
-        primerosRegistros: mapped.slice(0, 2).map(r => ({
-          nombre: r.nombre,
-          estado_vacuna: r.estado_vacuna,
-          esquema: r.esquema_completo,
-          tipo_vivienda: r.tipo_vivienda
-        }))
-      });
-      
-      if (nullStates.length > 0) {
-        console.warn('Advertencia: Hay registros con estado_vacuna = null. Esto es anómalo.');
-      }
+    const lim = Math.max(100, Math.min(limit, 10000));
+
+    const mapRows = (rows: any[]): RegistroMRV[] =>
+      (rows || []).map((row) => {
+        let estado = row.estado_vacunacion;
+        if (row.esquema_completo === true) {
+          estado = 'vacunado';
+        }
+        if (typeof estado !== 'string' || estado !== 'vacunado') {
+          estado = 'no_vacunado';
+        }
+        return {
+          id: row.id,
+          user_id: row.user_id,
+          fecha_hora: row.fecha_hora,
+          region: row.region || '',
+          distrito: row.distrito || '',
+          servicio: row.servicio ?? null,
+          barrio: row.barrio ?? null,
+          responsable: row.responsable ?? null,
+          nombre: row.nombre || '',
+          documento: row.documento || '',
+          fecha_nacimiento: row.fecha_nacimiento || '',
+          edad: row.edad ?? null,
+          sexo: row.sexo || '',
+          libreta: row.libreta ?? false,
+          estado_vacuna: estado,
+          motivo: row.motivo ?? null,
+          latitud: row.latitud ?? null,
+          longitud: row.longitud ?? null,
+          tipo_vivienda: normalizeTipoVivienda(row.tipo_vivienda ?? null),
+          esquema_completo: row.esquema_completo ?? null,
+        };
+      }) as RegistroMRV[];
+
+    const loadSnapshot = async (): Promise<RegistroMRV[]> => {
+      const raw = await mrvAppCache.getRegistrosSnapshot();
+      return Array.isArray(raw) ? (raw as RegistroMRV[]) : [];
+    };
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return await loadSnapshot();
     }
-    
-    return mapped;
+
+    try {
+      const { data, error } = await supabase
+        .from('registros_vacunacion')
+        .select('*')
+        .order('fecha_hora', { ascending: false })
+        .limit(lim);
+
+      if (error) {
+        console.error('❌ Error en getRegistros:', error);
+        return await loadSnapshot();
+      }
+
+      const mapped = mapRows(data || []);
+      if (mapped.length > 0) {
+        void mrvAppCache.saveRegistrosSnapshot(mapped);
+      }
+      console.log('🟢 [getRegistros] Primeros registros normalizados:', mapped.slice(0, 3));
+
+      if (mapped.length > 0) {
+        const nullStates = mapped.filter((r) => r.estado_vacuna === null);
+        const vacunados = mapped.filter((r) => r.estado_vacuna === 'vacunado');
+        const noVacunados = mapped.filter((r) => r.estado_vacuna === 'no_vacunado');
+
+        console.log('getRegistros - Análisis de datos:', {
+          total: mapped.length,
+          vacunados: vacunados.length,
+          noVacunados: noVacunados.length,
+          conEstadoNull: nullStates.length,
+          primerosRegistros: mapped.slice(0, 2).map((r) => ({
+            nombre: r.nombre,
+            estado_vacuna: r.estado_vacuna,
+            esquema: r.esquema_completo,
+            tipo_vivienda: r.tipo_vivienda,
+          })),
+        });
+
+        if (nullStates.length > 0) {
+          console.warn('Advertencia: Hay registros con estado_vacuna = null. Esto es anómalo.');
+        }
+      }
+
+      return mapped;
+    } catch (e) {
+      console.error('getRegistros (red):', e);
+      return await loadSnapshot();
+    }
   },
 
   async addPersonaBase(persona: PersonaBase): Promise<boolean> {

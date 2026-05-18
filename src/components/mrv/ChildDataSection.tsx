@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import { dataService, type PersonaBase } from '@/services/dataService';
 import { Search, Check, X, User, CreditCard } from 'lucide-react';
 import { esCodigoTemporal, validarFormatoCodigoTemporal } from '@/lib/temp-code-rve';
@@ -161,7 +161,7 @@ export default function ChildDataSection(props: Props) {
             <div className="p-3 sm:p-4 space-y-3 bg-card">
               {searchMode === 'documento' ? (
                 <>
-                  <div className="grid grid-cols-[minmax(0,7rem)_1fr] gap-2 gap-y-1 items-end">
+                  <div className="grid grid-cols-1 min-[400px]:grid-cols-[minmax(0,5.5rem)_1fr] gap-2 gap-y-1 items-end">
                     <div>
                       <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide block mb-1">
                         Tipo
@@ -173,11 +173,11 @@ export default function ChildDataSection(props: Props) {
                           setDocBusqueda('');
                           setSugerencias([]);
                         }}
-                        className="w-full h-10 px-2 rounded-lg border bg-background text-sm font-medium"
+                        className="w-full h-10 px-2 rounded-lg border bg-background text-sm font-bold tracking-wide text-center min-[400px]:text-left"
                         title="Tipo de documento (catálogo nómina MRV)"
                       >
                         {TIPOS_DOCUMENTO_MRV.map((t) => (
-                          <option key={t.value} value={t.value}>
+                          <option key={t.value} value={t.value} title={t.descripcion}>
                             {t.label}
                           </option>
                         ))}
@@ -225,7 +225,7 @@ export default function ChildDataSection(props: Props) {
                       setSearchMode('personales');
                       setSugerencias([]);
                     }}
-                    className="w-full h-11 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-md transition-colors"
+                    className="w-full h-11 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-sm flex items-center justify-center gap-2 shadow-md transition-colors"
                   >
                     <User className="w-5 h-5 shrink-0" />
                     Búsqueda por datos personales
@@ -335,7 +335,7 @@ export default function ChildDataSection(props: Props) {
                       setSearchMode('documento');
                       setSugerencias([]);
                     }}
-                    className="w-full h-11 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-md transition-colors"
+                    className="w-full h-11 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-sm flex items-center justify-center gap-2 shadow-md transition-colors"
                   >
                     <CreditCard className="w-5 h-5 shrink-0" />
                     Búsqueda por documento

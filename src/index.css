@@ -137,9 +137,12 @@
     -webkit-font-smoothing: antialiased;
     -webkit-tap-highlight-color: transparent;
     overflow-x: hidden;
+    min-height: 100dvh;
   }
   #root {
     min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
   }
   input, select, textarea {
     @apply text-foreground;
