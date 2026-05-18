@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">MRV 2026</string>
-    <string name="title_activity_main">MRV 2026</string>
+    <string name="app_name">M R V — PNEI y PAI — MSPBS</string>
+    <string name="title_activity_main">M R V — PNEI y PAI — MSPBS</string>
     <string name="package_name">py.gov.mspbs.mrv2026</string>
     <string name="custom_url_scheme">py.gov.mspbs.mrv2026</string>
 </resources>

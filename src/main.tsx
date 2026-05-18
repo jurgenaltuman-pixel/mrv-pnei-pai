@@ -2,6 +2,12 @@
  * Sin `import from "react"` en nivel superior: evita duplicar React (chunk `main` vs `vendor-react`)
  * y el error __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED.
  */
+declare global {
+  interface Window {
+    __MRV_SET_BOOT_PROGRESS?: (pct: number, label?: string) => void;
+  }
+}
+
 document.documentElement.lang = "es";
 // @ts-expect-error: propiedad no tipada en TS estándar
 document.documentElement.translate = false;
@@ -70,16 +76,36 @@ async function sweepStaleCachesOnce(): Promise<boolean> {
   return true;
 }
 
+function setBootProgressUI(pct: number, label?: string): void {
+  try {
+    window.__MRV_SET_BOOT_PROGRESS?.(pct, label);
+  } catch {
+    /* ignore */
+  }
+}
+
 async function boot(): Promise<void> {
   if (await sweepStaleCachesOnce()) return;
 
+  setBootProgressUI(6, "Descargando módulos…");
+  const total = 5;
+  let completed = 0;
+  const wrap = (label: string, p: Promise<unknown>) =>
+    p.finally(() => {
+      completed += 1;
+      const pct = 8 + Math.round((completed / total) * 88);
+      setBootProgressUI(pct, label);
+    });
+
   const [{ createElement }, { createRoot }, { default: App }, { AppErrorBoundary }] = await Promise.all([
-    import("react"),
-    import("react-dom/client"),
-    import("./App.tsx"),
-    import("./components/AppErrorBoundary.tsx"),
+    wrap("React", import("react")),
+    wrap("Interfaz", import("react-dom/client")),
+    wrap("Aplicación", import("./App.tsx")),
+    wrap("Protección de errores", import("./components/AppErrorBoundary.tsx")),
   ]);
-  await import("./index.css");
+  await wrap("Estilos", import("./index.css"));
+
+  setBootProgressUI(100, "Listo");
 
   const rootEl = document.getElementById("root");
   if (!rootEl) return;

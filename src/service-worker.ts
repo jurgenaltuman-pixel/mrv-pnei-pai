@@ -3,9 +3,10 @@
 declare const self: ServiceWorkerGlobalScope;
 
 /** Bump para forzar activate y limpiar lógica vieja (clone roto). */
-const CACHE_NAME = 'mrv-v12-static';
+const CACHE_NAME = 'mrv-v13-static';
 
 const URLS_TO_CACHE = [
+  '/mrv-boot-ui.js',
   '/manifest.json',
   '/robots.txt',
   '/logo-mrv-oficial.png',

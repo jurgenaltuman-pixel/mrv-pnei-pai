@@ -12,7 +12,16 @@
       ],
       "headers": [
         {
-          "source": "/index.html",
+          "source": "/assets/**",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "public, max-age=31536000, immutable"
+            }
+          ]
+        },
+        {
+          "source": "/manifest.json",
           "headers": [
             {
               "key": "Cache-Control",
@@ -21,11 +30,38 @@
           ]
         },
         {
-          "source": "/assets/**",
+          "source": "/service-worker.js",
           "headers": [
             {
               "key": "Cache-Control",
-              "value": "public, max-age=31536000, immutable"
+              "value": "no-cache, no-store, must-revalidate"
+            }
+          ]
+        },
+        {
+          "source": "/mrv-boot-ui.js",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
+            }
+          ]
+        },
+        {
+          "source": "/",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
+            }
+          ]
+        },
+        {
+          "source": "/index.html",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
             }
           ]
         }

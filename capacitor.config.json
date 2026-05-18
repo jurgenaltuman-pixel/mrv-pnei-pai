@@ -1,13 +1,13 @@
 {
   "appId": "py.gov.mspbs.mrv2026",
-  "appName": "M R V PNEI",
+  "appName": "M R V — PNEI y PAI — MSPBS",
   "webDir": "dist-vite",
   "server": {
     "androidScheme": "https",
     "iosScheme": "https"
   },
   "android": {
-    "allowMixedContent": true,
+    "allowMixedContent": false,
     "backgroundColor": "#0055A4"
   },
   "ios": {
