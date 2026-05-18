@@ -1,4 +1,4 @@
-# Firebase Hosting — build + deploy en cada push a main (o manual).
+# Firebase Hosting — build en cada push; deploy solo si existe cuenta de servicio.
 name: Deploy to Firebase Hosting on merge
 
 on:
@@ -13,29 +13,28 @@ env:
   FIREBASE_HOSTING_TARGET: mrvpai
 
 jobs:
-  build_and_deploy:
+  build:
+    name: build_and_deploy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Verify deploy secrets
+      - name: Verify build secrets
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MRVPAI_2026 }}
         run: |
           set -euo pipefail
           missing() { echo "::error::$1"; exit 1; }
-          [ -n "${VITE_SUPABASE_URL:-}" ] || missing "Falta el secreto VITE_SUPABASE_URL (Settings → Secrets). Sin él el build no apunta al proyecto Supabase correcto."
+          [ -n "${VITE_SUPABASE_URL:-}" ] || missing "Falta el secreto VITE_SUPABASE_URL (Settings → Secrets and variables → Actions). Sin él el build no apunta al proyecto Supabase correcto."
           [ -n "${VITE_SUPABASE_PUBLISHABLE_KEY:-}" ] || missing "Falta VITE_SUPABASE_PUBLISHABLE_KEY (clave publicable/anon de Supabase)."
-          [ -n "${FIREBASE_SERVICE_ACCOUNT:-}" ] || missing "Falta FIREBASE_SERVICE_ACCOUNT_MRVPAI_2026 (JSON de cuenta de servicio). Sin él no se puede publicar en Hosting."
-          echo "OK: secretos presentes para build + deploy."
+          echo "OK: secretos de build presentes."
 
       - name: Build web
         env:
@@ -43,6 +42,35 @@ jobs:
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_BUILD_ID: ${{ github.sha }}
         run: npm ci && npm run build
+
+      - name: Upload dist (para deploy)
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: dist-vite
+          retention-days: 2
+
+      - name: Aviso si falta deploy a Firebase
+        if: success()
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MRVPAI_2026 }}
+        run: |
+          if [ -z "${FIREBASE_SERVICE_ACCOUNT:-}" ]; then
+            echo "::warning::El build se completó. Para publicar en Firebase Hosting, agregá el secreto FIREBASE_SERVICE_ACCOUNT_MRVPAI_2026 (JSON de cuenta de servicio: Firebase Console → Project settings → Service accounts → Generate new private key) en GitHub → Settings → Secrets and variables → Actions."
+          fi
+
+  deploy:
+    needs: build
+    if: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MRVPAI_2026 != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download build
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: dist-vite
 
       - name: Deploy Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0
