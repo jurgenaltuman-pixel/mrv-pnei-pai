@@ -6,33 +6,66 @@ document.documentElement.lang = "es";
 // @ts-expect-error: propiedad no tipada en TS estándar
 document.documentElement.translate = false;
 
-const SW_SWEEP_KEY = "mrv-sw-sweep-2026-05-19-no-manual-vendor";
+/** Bump al desplegar si hay que forzar otro barrido (chunks viejos, SW roto). */
+const SW_SWEEP_KEY = "mrv-sw-sweep-2026-05-15-persist-or-skip-reload";
+
+function sweepMarkerIsSet(): boolean {
+  try {
+    if (localStorage.getItem(SW_SWEEP_KEY) === "1") return true;
+  } catch {
+    /* ignore */
+  }
+  try {
+    if (sessionStorage.getItem(SW_SWEEP_KEY) === "1") return true;
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+/** Devuelve false si no se pudo persistir ningún marcador (evita bucle reload + «Cargando…»). */
+function setSweepMarker(): boolean {
+  try {
+    localStorage.setItem(SW_SWEEP_KEY, "1");
+    return true;
+  } catch {
+    try {
+      sessionStorage.setItem(SW_SWEEP_KEY, "1");
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
 
 async function sweepStaleCachesOnce(): Promise<boolean> {
   if (typeof window === "undefined") return false;
-  try {
-    if (localStorage.getItem(SW_SWEEP_KEY) === "1") return false;
-  } catch {
-    return false;
-  }
+  if (sweepMarkerIsSet()) return false;
+
+  let clearedSomething = false;
   try {
     if ("serviceWorker" in navigator) {
       const regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map((r) => r.unregister()));
+      if (regs.length > 0) {
+        await Promise.all(regs.map((r) => r.unregister()));
+        clearedSomething = true;
+      }
     }
     if ("caches" in window) {
       const keys = await caches.keys();
-      await Promise.all(keys.map((k) => caches.delete(k)));
+      if (keys.length > 0) {
+        await Promise.all(keys.map((k) => caches.delete(k)));
+        clearedSomething = true;
+      }
     }
   } catch (e) {
     console.warn("mrv sweep", e);
-  } finally {
-    try {
-      localStorage.setItem(SW_SWEEP_KEY, "1");
-    } catch {
-      /* private mode */
-    }
   }
+
+  const marked = setSweepMarker();
+  // Sin marcador persistido, no recargar: en modo privado u orígenes raros setItem falla y el reload anterior causaba bucle infinito.
+  if (!marked || !clearedSomething) return false;
+
   window.location.reload();
   return true;
 }
