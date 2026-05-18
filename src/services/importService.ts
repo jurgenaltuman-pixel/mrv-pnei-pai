@@ -225,19 +225,51 @@ export async function importarUsuarios(usuarios: UserImportRow[]): Promise<{
   return resultados;
 }
 
-// Importar Catálogo (Regiones/Distritos/Servicios/Barrios)
-export async function importarCatalogo(unidades: UnitImportRow[]): Promise<{
+type CatalogNode = { servicios: Set<string>; barrios: Set<string> };
+
+/** Importar catálogo: deduplica región/distrito/servicio/barrio antes de insertar. */
+export async function importarCatalogo(
+  unidades: UnitImportRow[],
+  onProgress?: (pct: number, label: string) => void
+): Promise<{
   exitosos: number;
   fallidos: number;
   errores: Array<{ fila: number; mensaje: string }>;
+  resumen?: { regiones: number; distritos: number; servicios: number; barrios: number };
 }> {
   const resultados = {
     exitosos: 0,
     fallidos: 0,
-    errores: [] as Array<{ fila: number; mensaje: string }>
+    errores: [] as Array<{ fila: number; mensaje: string }>,
   };
 
-  // Primero, limpiar catálogos existentes
+  const tree = new Map<string, Map<string, CatalogNode>>();
+
+  for (let i = 0; i < unidades.length; i++) {
+    const unidad = unidades[i];
+    const fila = i + 2;
+    const validacion = validarUnidad(unidad);
+    if (!validacion.valido) {
+      resultados.fallidos++;
+      resultados.errores.push({ fila, mensaje: validacion.errores.join('; ') });
+      continue;
+    }
+
+    const region = unidad.region.toString().trim();
+    const distrito = unidad.distrito.toString().trim();
+    const servicio = unidad.servicio_salud.toString().trim();
+    const barrio = unidad.barrio?.toString().trim();
+
+    if (!tree.has(region)) tree.set(region, new Map());
+    const distMap = tree.get(region)!;
+    if (!distMap.has(distrito)) distMap.set(distrito, { servicios: new Set(), barrios: new Set() });
+    const node = distMap.get(distrito)!;
+    node.servicios.add(servicio);
+    if (barrio) node.barrios.add(barrio);
+    resultados.exitosos++;
+  }
+
+  onProgress?.(5, 'Limpiando catálogo anterior…');
   try {
     await supabase.from('barrios').delete().neq('id', 0);
     await supabase.from('servicios_salud').delete().neq('id', 0);
@@ -247,116 +279,133 @@ export async function importarCatalogo(unidades: UnitImportRow[]): Promise<{
     console.warn('Error limpiando catálogos:', error);
   }
 
-  // Obtener o crear regiones
-  const regiones = new Map<string, number>();
-  
-  for (let i = 0; i < unidades.length; i++) {
-    const unidad = unidades[i];
-    const fila = i + 2;
+  const regionIdByName = new Map<string, number>();
+  const distritoIdByKey = new Map<string, number>();
+  const servicioKeySeen = new Set<string>();
+  const barrioKeySeen = new Set<string>();
 
-    const validacion = validarUnidad(unidad);
-    if (!validacion.valido) {
-      resultados.fallidos++;
-      resultados.errores.push({
-        fila,
-        mensaje: validacion.errores.join('; ')
-      });
+  let regionCount = 0;
+  let distritoCount = 0;
+  let servicioCount = 0;
+  let barrioCount = 0;
+
+  const regionNames = [...tree.keys()];
+  for (let ri = 0; ri < regionNames.length; ri++) {
+    const nombreRegion = regionNames[ri];
+    onProgress?.(10 + Math.round((ri / Math.max(regionNames.length, 1)) * 25), `Región: ${nombreRegion}`);
+    const { data, error } = await supabase
+      .from('regiones_sanitarias')
+      .insert({
+        nombre: nombreRegion,
+        codigo: nombreRegion.replace(/[^A-Za-z]/g, '').substring(0, 6).toUpperCase() || 'REG',
+      })
+      .select('id')
+      .single();
+    if (error || !data) {
+      resultados.errores.push({ fila: 0, mensaje: `Región «${nombreRegion}»: ${error?.message ?? 'sin id'}` });
       continue;
     }
+    regionIdByName.set(nombreRegion, data.id);
+    regionCount++;
+  }
 
-    try {
-      const nombreRegion = unidad.region.toString().trim();
-      
-      // Si la región no existe, crearla
-      if (!regiones.has(nombreRegion)) {
-        const { data: regionData, error: regionError } = await supabase
-          .from('regiones_sanitarias')
-          .insert({
-            nombre: nombreRegion,
-            codigo: nombreRegion.substring(0, 3).toUpperCase()
-          })
+  let distritosTotal = 0;
+  for (const distMap of tree.values()) distritosTotal += distMap.size;
+  let distritosDone = 0;
+
+  for (const [nombreRegion, distMap] of tree) {
+    const regionId = regionIdByName.get(nombreRegion);
+    if (!regionId) continue;
+
+    for (const [nombreDistrito, node] of distMap) {
+      distritosDone++;
+      onProgress?.(
+        35 + Math.round((distritosDone / Math.max(distritosTotal, 1)) * 30),
+        `Distrito: ${nombreDistrito}`
+      );
+
+      const distKey = `${regionId}|${nombreDistrito}`;
+      let distritoId = distritoIdByKey.get(distKey);
+      if (!distritoId) {
+        const { data, error } = await supabase
+          .from('distritos')
+          .insert({ nombre: nombreDistrito, region_id: regionId })
           .select('id')
           .single();
-
-        if (regionError) {
-          resultados.fallidos++;
+        if (error || !data) {
           resultados.errores.push({
-            fila,
-            mensaje: `Error creando región: ${regionError.message}`
+            fila: 0,
+            mensaje: `Distrito «${nombreDistrito}»: ${error?.message ?? 'sin id'}`,
           });
           continue;
         }
-
-        regiones.set(nombreRegion, regionData.id);
+        distritoId = data.id;
+        distritoIdByKey.set(distKey, distritoId);
+        distritoCount++;
       }
 
-      const regionId = regiones.get(nombreRegion)!;
-
-      // Crear o actualizar distrito
-      const { data: distritoData, error: distritoError } = await supabase
-        .from('distritos')
-        .insert({
-          nombre: unidad.distrito.toString().trim(),
-          region_id: regionId
-        })
-        .select('id')
-        .single();
-
-      if (distritoError) {
-        resultados.fallidos++;
-        resultados.errores.push({
-          fila,
-          mensaje: `Error creando distrito: ${distritoError.message}`
-        });
-        continue;
-      }
-
-      const distritoId = distritoData.id;
-
-      // Crear servicio de salud
-      const { error: servicioError } = await supabase
-        .from('servicios_salud')
-        .insert({
-          nombre: unidad.servicio_salud.toString().trim(),
+      for (const nombreServicio of node.servicios) {
+        const sKey = `${distritoId}|${nombreServicio}`;
+        if (servicioKeySeen.has(sKey)) continue;
+        servicioKeySeen.add(sKey);
+        const { error } = await supabase.from('servicios_salud').insert({
+          nombre: nombreServicio,
           distrito_id: distritoId,
-          tipo: 'Servicio'
+          tipo: 'Servicio',
         });
-
-      if (servicioError) {
-        resultados.fallidos++;
-        resultados.errores.push({
-          fila,
-          mensaje: `Error creando servicio: ${servicioError.message}`
-        });
-        continue;
+        if (error) {
+          resultados.errores.push({ fila: 0, mensaje: `Servicio «${nombreServicio}»: ${error.message}` });
+        } else {
+          servicioCount++;
+        }
       }
 
-      // Crear barrio si existe
-      if (unidad.barrio && unidad.barrio.toString().trim() !== '') {
-        await supabase
-          .from('barrios')
-          .insert({
-            nombre: unidad.barrio.toString().trim(),
-            distrito_id: distritoId
-          });
+      for (const nombreBarrio of node.barrios) {
+        const bKey = `${distritoId}|${nombreBarrio}`;
+        if (barrioKeySeen.has(bKey)) continue;
+        barrioKeySeen.add(bKey);
+        const { error } = await supabase.from('barrios').insert({
+          nombre: nombreBarrio,
+          distrito_id: distritoId,
+        });
+        if (error) {
+          resultados.errores.push({ fila: 0, mensaje: `Barrio «${nombreBarrio}»: ${error.message}` });
+        } else {
+          barrioCount++;
+        }
       }
-
-      resultados.exitosos++;
-
-    } catch (error) {
-      resultados.fallidos++;
-      resultados.errores.push({
-        fila,
-        mensaje: error instanceof Error ? error.message : 'Error desconocido'
-      });
     }
   }
 
-  return resultados;
+  onProgress?.(100, 'Catálogo listo');
+  return {
+    ...resultados,
+    resumen: { regiones: regionCount, distritos: distritoCount, servicios: servicioCount, barrios: barrioCount },
+  };
 }
 
-// Importar Personas
-export async function importarPersonas(personas: PersonaImportRow[]): Promise<{
+const PERSONAS_BATCH = 400;
+
+function personaToRecord(persona: PersonaImportRow) {
+  return {
+    nombre: persona.nombre.toString().trim(),
+    tipo_documento: persona.tipo_documento.toString().trim().toUpperCase(),
+    documento: persona.documento.toString().trim(),
+    fecha_nacimiento: persona.fecha_nacimiento.toString().trim(),
+    sexo: persona.sexo.toString().trim().toUpperCase(),
+    region_sanitaria: persona.region_sanitaria.toString().trim(),
+    distrito: persona.distrito.toString().trim(),
+    servicio_salud: persona.servicio_salud.toString().trim(),
+    documento_madre: persona.documento_madre?.toString().trim() || null,
+    nombre_madre: persona.nombre_madre?.toString().trim() || null,
+  };
+}
+
+/** Importar personas en lotes; opcionalmente vacía base_personas antes. */
+export async function importarPersonas(
+  personas: PersonaImportRow[],
+  options?: { reemplazar?: boolean; onProgress?: (pct: number, label: string) => void }
+): Promise<{
   exitosos: number;
   fallidos: number;
   errores: Array<{ fila: number; mensaje: string }>;
@@ -364,58 +413,56 @@ export async function importarPersonas(personas: PersonaImportRow[]): Promise<{
   const resultados = {
     exitosos: 0,
     fallidos: 0,
-    errores: [] as Array<{ fila: number; mensaje: string }>
+    errores: [] as Array<{ fila: number; mensaje: string }>,
   };
+
+  const validRows: { fila: number; record: ReturnType<typeof personaToRecord> }[] = [];
 
   for (let i = 0; i < personas.length; i++) {
     const persona = personas[i];
     const fila = i + 2;
-
     const validacion = validarPersona(persona);
     if (!validacion.valido) {
       resultados.fallidos++;
-      resultados.errores.push({
-        fila,
-        mensaje: validacion.errores.join('; ')
-      });
+      if (resultados.errores.length < 200) {
+        resultados.errores.push({ fila, mensaje: validacion.errores.join('; ') });
+      }
       continue;
     }
+    validRows.push({ fila, record: personaToRecord(persona) });
+  }
 
-    try {
-      const { error } = await supabase
-        .from('base_personas')
-        .insert({
-          nombre: persona.nombre.toString().trim(),
-          tipo_documento: persona.tipo_documento.toString().trim(),
-          documento: persona.documento.toString().trim(),
-          fecha_nacimiento: persona.fecha_nacimiento.toString().trim(),
-          sexo: persona.sexo.toString().trim(),
-          region_sanitaria: persona.region_sanitaria.toString().trim(),
-          distrito: persona.distrito.toString().trim(),
-          servicio_salud: persona.servicio_salud.toString().trim(),
-          documento_madre: persona.documento_madre?.toString().trim() || null,
-          nombre_madre: persona.nombre_madre?.toString().trim() || null
-        });
-
-      if (error) {
-        resultados.fallidos++;
-        resultados.errores.push({
-          fila,
-          mensaje: error.message
-        });
-        continue;
-      }
-
-      resultados.exitosos++;
-
-    } catch (error) {
-      resultados.fallidos++;
-      resultados.errores.push({
-        fila,
-        mensaje: error instanceof Error ? error.message : 'Error desconocido'
-      });
+  if (options?.reemplazar) {
+    options.onProgress?.(2, 'Eliminando padrón anterior…');
+    const { error } = await supabase
+      .from('base_personas')
+      .delete()
+      .neq('id', '00000000-0000-0000-0000-000000000000');
+    if (error) {
+      resultados.errores.push({ fila: 0, mensaje: `No se pudo vaciar base_personas: ${error.message}` });
     }
   }
 
+  const total = validRows.length;
+  for (let i = 0; i < validRows.length; i += PERSONAS_BATCH) {
+    const chunk = validRows.slice(i, i + PERSONAS_BATCH);
+    const pct = 5 + Math.round(((i + chunk.length) / Math.max(total, 1)) * 94);
+    options?.onProgress?.(pct, `${i + chunk.length} / ${total} personas`);
+
+    const { error } = await supabase.from('base_personas').insert(chunk.map((c) => c.record));
+    if (error) {
+      resultados.fallidos += chunk.length;
+      if (resultados.errores.length < 200) {
+        resultados.errores.push({
+          fila: chunk[0]?.fila ?? 0,
+          mensaje: `Lote ${i / PERSONAS_BATCH + 1}: ${error.message}`,
+        });
+      }
+    } else {
+      resultados.exitosos += chunk.length;
+    }
+  }
+
+  options?.onProgress?.(100, 'Importación finalizada');
   return resultados;
 }

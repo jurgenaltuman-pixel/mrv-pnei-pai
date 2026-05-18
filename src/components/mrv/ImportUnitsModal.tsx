@@ -5,7 +5,8 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Progress } from '@/components/ui/progress';
 import { AlertCircle, CheckCircle, Upload, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { importarCatalogo, validarUnidad, UnitImportRow } from '@/services/importService';
+import { importarCatalogo, validarUnidad } from '@/services/importService';
+import { mapUnitRows } from '@/lib/import-excel-mrv';
 
 interface ImportUnitsModalProps {
   open: boolean;
@@ -16,6 +17,7 @@ export function ImportUnitsModal({ open, onOpenChange }: ImportUnitsModalProps) 
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [progressLabel, setProgressLabel] = useState('');
   const [resultado, setResultado] = useState<any>(null);
   const [erroresPreview, setErroresPreview] = useState<Array<{ fila: number; errores: string[] }>>([]);
 
@@ -35,7 +37,7 @@ export function ImportUnitsModal({ open, onOpenChange }: ImportUnitsModalProps) 
         const data = event.target?.result;
         const workbook = XLSX.read(data, { type: 'binary' });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json<any>(worksheet);
+        const rows = mapUnitRows(XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet));
 
         const errores: Array<{ fila: number; errores: string[] }> = [];
         rows.forEach((row, index) => {
@@ -69,11 +71,13 @@ export function ImportUnitsModal({ open, onOpenChange }: ImportUnitsModalProps) 
           const data = event.target?.result;
           const workbook = XLSX.read(data, { type: 'binary' });
           const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-          const unidades = XLSX.utils.sheet_to_json<UnitImportRow>(worksheet);
+          const unidades = mapUnitRows(XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet));
 
-          setProgress(30);
-
-          const result = await importarCatalogo(unidades);
+          setProgress(5);
+          const result = await importarCatalogo(unidades, (pct, label) => {
+            setProgress(pct);
+            setProgressLabel(label);
+          });
           setProgress(100);
           setResultado(result);
         } catch (error) {
@@ -126,8 +130,8 @@ export function ImportUnitsModal({ open, onOpenChange }: ImportUnitsModalProps) 
             Importar Catálogo (Regiones/Distritos/Servicios/Barrios)
           </DialogTitle>
           <DialogDescription>
-            Cargue un archivo Excel con columnas: región, distrito, servicio_salud, barrio (opcional).
-            Esta acción reemplazará el catálogo existente.
+            Suba «Unidad Organizativa para MRV.xlsx» (columnas: region, distrito, servicio_salud, barrio).
+            Reemplaza el catálogo completo de regiones, distritos, servicios y barrios.
           </DialogDescription>
         </DialogHeader>
 
@@ -184,7 +188,7 @@ export function ImportUnitsModal({ open, onOpenChange }: ImportUnitsModalProps) 
           {/* Barra de progreso */}
           {loading && (
             <div className="space-y-2">
-              <div className="text-sm text-gray-600">Importando catálogo...</div>
+              <div className="text-sm text-gray-600">{progressLabel || 'Importando catálogo…'}</div>
               <Progress value={progress} className="w-full" />
             </div>
           )}
@@ -215,7 +219,10 @@ export function ImportUnitsModal({ open, onOpenChange }: ImportUnitsModalProps) 
 
                   {resultado.exitosos > 0 && (
                     <div className="bg-white p-3 rounded border border-green-200 text-sm text-green-800">
-                      ✅ Catálogo importado correctamente. Se crearán automáticamente las regiones, distritos, servicios y barrios.
+                      {resultado.resumen
+                        ? `Catálogo: ${resultado.resumen.regiones} regiones, ${resultado.resumen.distritos} distritos, ${resultado.resumen.servicios} servicios, ${resultado.resumen.barrios} barrios. `
+                        : ''}
+                      {resultado.exitosos.toLocaleString('es-PY')} filas del Excel procesadas.
                     </div>
                   )}
                 </div>

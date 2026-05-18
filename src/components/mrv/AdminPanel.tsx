@@ -7,6 +7,7 @@ import { useOrgStructure } from '@/hooks/useOrgStructure';
 import { dataService } from '@/services/dataService';
 import { Upload, FileSpreadsheet, Trash2, Loader2, CheckCircle, AlertTriangle, Users, Search, Download, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { mapPersonaImportRow } from '@/lib/import-excel-mrv';
 
 type PersonaRow = Database['public']['Tables']['base_personas']['Row'];
 
@@ -746,6 +747,15 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > 25 * 1024 * 1024) {
+      toast({
+        title: 'Archivo de nómina muy grande',
+        description:
+          'Para «Nómina de Niños para MRV.xlsx» (~130 MB) ejecute en la carpeta del proyecto: npm run import:mrv-nomina (requiere SUPABASE_SERVICE_ROLE_KEY en .env).',
+        variant: 'destructive',
+      });
+      return;
+    }
     const reader = new FileReader();
     reader.onload = (evt) => {
       try {
@@ -762,34 +772,23 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
         
         if (!nonEmptyRows.length) throw new Error('No hay datos en el archivo');
         
-        const parsed: ParsedRow[] = nonEmptyRows.map(row => {
-          const keys = Object.keys(row);
-          const map = new Map(keys.map((k) => [normalizeHeader(k), k]));
-
-          const keyNombre = map.get('nombre') || map.get('nombre_y_apellido') || map.get('nombres_y_apellidos') || keys[0];
-          const keyTipoDoc = map.get('tipo_documento') || map.get('tipo_de_documento') || keys[1];
-          const keyDocumento = map.get('documento') || map.get('cedula') || map.get('cedula_de_identidad') || keys[2];
-          const keyFechaNac = map.get('fecha_nacimiento') || map.get('fecha_de_nacimiento') || keys[3];
-          const keySexo = map.get('sexo') || keys[4];
-          const keyRegion = map.get('region_sanitaria') || map.get('region') || map.get('region_sanitarias') || keys[5];
-          const keyDistrito = map.get('distrito') || keys[6];
-          const keyServicio = map.get('servicio_salud') || map.get('servicio_de_salud') || map.get('servicio') || keys[7];
-          const keyDocMadre = map.get('documento_madre') || map.get('cedula_madre') || keys[8];
-          const keyNomMadre = map.get('nombre_madre') || map.get('madre') || keys[9];
-
-          return {
-            nombre: String(row[keyNombre] || '').trim(),
-            tipo_documento: String(row[keyTipoDoc] || 'CI').trim(),
-            documento: String(row[keyDocumento] || '').trim(),
-            fecha_nacimiento: parseDate(row[keyFechaNac]),
-            sexo: String(row[keySexo] || '').trim() || null,
-            region_sanitaria: String(row[keyRegion] || '').trim() || null,
-            distrito: String(row[keyDistrito] || '').trim() || null,
-            servicio_salud: String(row[keyServicio] || '').trim() || null,
-            documento_madre: String(row[keyDocMadre] || '').trim() || null,
-            nombre_madre: String(row[keyNomMadre] || '').trim() || null,
-          };
-        }).filter(r => r.nombre && r.documento);
+        const parsed: ParsedRow[] = nonEmptyRows
+          .map((row) => {
+            const p = mapPersonaImportRow(row as Record<string, unknown>);
+            return {
+              nombre: p.nombre,
+              tipo_documento: p.tipo_documento,
+              documento: p.documento,
+              fecha_nacimiento: p.fecha_nacimiento,
+              sexo: p.sexo || null,
+              region_sanitaria: p.region_sanitaria || null,
+              distrito: p.distrito || null,
+              servicio_salud: p.servicio_salud || null,
+              documento_madre: p.documento_madre || null,
+              nombre_madre: p.nombre_madre || null,
+            };
+          })
+          .filter((r) => r.nombre && r.documento);
         
         if (!parsed.length) throw new Error('No hay registros válidos con nombre y documento');
         
@@ -1358,8 +1357,7 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
           Importar Regiones / Distritos / Servicios / Barrios
         </h3>
         <p className="text-xs text-muted-foreground leading-relaxed">
-          Suba un archivo Excel con columnas de Región, Distrito, Servicio y opcionalmente Barrio/Localidad
-          (ej.: region, distrito, servicio_salud, barrio). Esta acción reemplaza el catálogo para dejarlo limpio y ordenado.
+          Use «Unidad Organizativa para MRV.xlsx» (columnas: region, distrito, servicio_salud, barrio). Reemplaza todo el catálogo.
         </p>
         <input ref={orgFileRef} type="file" accept=".xlsx,.xls" onChange={handleOrgFile} className="hidden" title="Seleccionar archivo de unidades" />
         <div className="flex gap-2">
@@ -1382,7 +1380,7 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
           Importar Base de Personas (.xlsx)
         </h3>
         <p className="text-xs text-muted-foreground leading-relaxed">
-          Suba un archivo Excel con las columnas: Nombre, Tipo Documento, Documento, Fecha Nacimiento, Sexo, Región Sanitaria, Distrito, Servicio de Salud, Documento Madre, Nombre Madre.
+          Use «Nómina de Niños para MRV.xlsx» (nombre1/apellido1…, tipo_documento, documento, fecha_nacimiento, sexo, region_sanitaria, municipio o distrito, servicio_salud, madre_documento / madre_nombre…). Archivos &gt;25 MB: npm run import:mrv-nomina.
         </p>
         <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleFile} className="hidden" title="Seleccionar archivo Excel" />
         <div className="flex gap-2">

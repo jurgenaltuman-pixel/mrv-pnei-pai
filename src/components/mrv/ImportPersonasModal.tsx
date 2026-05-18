@@ -5,7 +5,8 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Progress } from '@/components/ui/progress';
 import { AlertCircle, CheckCircle, Upload, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { importarPersonas, validarPersona, PersonaImportRow } from '@/services/importService';
+import { importarPersonas, validarPersona } from '@/services/importService';
+import { mapPersonaRows } from '@/lib/import-excel-mrv';
 
 interface ImportPersonasModalProps {
   open: boolean;
@@ -16,15 +17,20 @@ export function ImportPersonasModal({ open, onOpenChange }: ImportPersonasModalP
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [progressLabel, setProgressLabel] = useState('');
   const [resultado, setResultado] = useState<any>(null);
   const [erroresPreview, setErroresPreview] = useState<Array<{ fila: number; errores: string[] }>>([]);
+  const [validasPreview, setValidasPreview] = useState(0);
+  const [archivoGrande, setArchivoGrande] = useState(false);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
       setFile(selectedFile);
       setErroresPreview([]);
-      previewFile(selectedFile);
+      setValidasPreview(0);
+      setArchivoGrande(selectedFile.size > 20 * 1024 * 1024);
+      if (selectedFile.size <= 20 * 1024 * 1024) previewFile(selectedFile);
     }
   };
 
@@ -35,20 +41,21 @@ export function ImportPersonasModal({ open, onOpenChange }: ImportPersonasModalP
         const data = event.target?.result;
         const workbook = XLSX.read(data, { type: 'binary' });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json<any>(worksheet);
+        const rows = mapPersonaRows(XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet));
 
         const errores: Array<{ fila: number; errores: string[] }> = [];
-        rows.forEach((row, index) => {
+        let ok = 0;
+        rows.slice(0, 5000).forEach((row, index) => {
           const validacion = validarPersona(row);
           if (!validacion.valido) {
-            errores.push({
-              fila: index + 2,
-              errores: validacion.errores
-            });
-          }
+            if (errores.length < 50) {
+              errores.push({ fila: index + 2, errores: validacion.errores });
+            }
+          } else ok++;
         });
 
         setErroresPreview(errores);
+        setValidasPreview(ok);
       } catch (error) {
         console.error('Error al leer archivo:', error);
       }
@@ -69,11 +76,15 @@ export function ImportPersonasModal({ open, onOpenChange }: ImportPersonasModalP
           const data = event.target?.result;
           const workbook = XLSX.read(data, { type: 'binary' });
           const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-          const personas = XLSX.utils.sheet_to_json<PersonaImportRow>(worksheet);
+          const personas = mapPersonaRows(XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet));
 
-          setProgress(30);
-
-          const result = await importarPersonas(personas);
+          const result = await importarPersonas(personas, {
+            reemplazar: true,
+            onProgress: (pct, label) => {
+              setProgress(pct);
+              setProgressLabel(label);
+            },
+          });
           setProgress(100);
           setResultado(result);
         } catch (error) {
@@ -132,8 +143,9 @@ export function ImportPersonasModal({ open, onOpenChange }: ImportPersonasModalP
             Importar Base de Personas
           </DialogTitle>
           <DialogDescription>
-            Cargue un archivo Excel con columnas: nombre, tipo_documento, documento, fecha_nacimiento, sexo,
-            region_sanitaria, distrito, servicio_salud, documento_madre (opcional), nombre_madre (opcional).
+            Suba «Nómina de Niños para MRV.xlsx» (nombre1/apellido1… o nombre completo; municipio = distrito).
+            Archivos muy grandes (&gt;20 MB): use{' '}
+            <code className="text-xs">npm run import:mrv-data</code> en el proyecto.
           </DialogDescription>
         </DialogHeader>
 
@@ -160,6 +172,16 @@ export function ImportPersonasModal({ open, onOpenChange }: ImportPersonasModalP
             />
           </div>
 
+          {archivoGrande && (
+            <Alert className="bg-amber-50 border-amber-200">
+              <AlertCircle className="h-4 w-4 text-amber-600" />
+              <AlertDescription className="text-amber-900 text-sm">
+                Este archivo es muy grande para el navegador. Ejecute en la carpeta del proyecto:{' '}
+                <strong>npm run import:mrv-data</strong> (importa catálogo y nómina a Supabase).
+              </AlertDescription>
+            </Alert>
+          )}
+
           {/* Vista previa de errores de validación */}
           {erroresPreview.length > 0 && (
             <Alert variant="destructive">
@@ -182,7 +204,7 @@ export function ImportPersonasModal({ open, onOpenChange }: ImportPersonasModalP
           {/* Barra de progreso */}
           {loading && (
             <div className="space-y-2">
-              <div className="text-sm text-gray-600">Importando personas...</div>
+              <p className="text-sm text-gray-600">{progressLabel || 'Importando personas�'}</p>
               <Progress value={progress} className="w-full" />
             </div>
           )}
@@ -236,7 +258,7 @@ export function ImportPersonasModal({ open, onOpenChange }: ImportPersonasModalP
             </Button>
             <Button
               onClick={handleImport}
-              disabled={!file || loading || erroresPreview.length > 0}
+              disabled={!file || loading || archivoGrande || validasPreview === 0}
               className="bg-blue-600 hover:bg-blue-700"
             >
               {loading ? 'Importando...' : 'Importar Personas'}
