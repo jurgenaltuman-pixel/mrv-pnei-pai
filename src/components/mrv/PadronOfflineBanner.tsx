@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Download, CheckCircle2, Loader2, X, WifiOff } from 'lucide-react';
-import { mrvPadronIndexed } from '@/services/mrvPadronIndexed';
+import { mrvPadronIndexed, type PadronDownloadProgress } from '@/services/mrvPadronIndexed';
 import { useToast } from '@/hooks/use-toast';
 
 const DISMISS_KEY = 'mrv_padron_banner_dismissed';
@@ -14,7 +14,7 @@ export function PadronOfflineBanner({ isOnline }: Props) {
   const [ready, setReady] = useState(false);
   const [dismissed, setDismissed] = useState(() => localStorage.getItem(DISMISS_KEY) === '1');
   const [downloading, setDownloading] = useState(false);
-  const [progress, setProgress] = useState<{ imported: number; page: number } | null>(null);
+  const [progress, setProgress] = useState<PadronDownloadProgress | null>(null);
 
   const refresh = useCallback(() => {
     void mrvPadronIndexed.isReady().then(setReady);
@@ -30,7 +30,7 @@ export function PadronOfflineBanner({ isOnline }: Props) {
   const handleDownload = async () => {
     if (!isOnline || downloading) return;
     setDownloading(true);
-    setProgress(null);
+    setProgress({ imported: 0, total: null, page: 0, bytesApprox: 0, percent: null });
     try {
       const res = await mrvPadronIndexed.downloadFromServer((p) => setProgress(p));
       if (res.error) {
@@ -102,10 +102,33 @@ export function PadronOfflineBanner({ isOnline }: Props) {
           Descargá las personas autorizadas en tu dispositivo para que la búsqueda por documento o datos personales
           funcione en terreno sin señal (requiere espacio libre y unos minutos con WiFi/datos).
         </p>
-        {progress && (
-          <p className="mt-1 font-mono text-[11px] text-sky-900">
-            Importando… {progress.imported.toLocaleString('es-PY')} filas (lote {progress.page})
-          </p>
+        {downloading && progress && (
+          <div className="mt-2 space-y-1.5" aria-live="polite">
+            <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5 text-[10px] font-semibold text-sky-950">
+              <span>
+                {progress.total != null
+                  ? `${progress.imported.toLocaleString('es-PY')} / ${progress.total.toLocaleString('es-PY')} personas`
+                  : progress.imported > 0
+                    ? `${progress.imported.toLocaleString('es-PY')} personas importadas`
+                    : 'Contando filas en el servidor…'}
+              </span>
+              <span className="font-mono tabular-nums shrink-0">
+                {(progress.bytesApprox / (1024 * 1024)).toFixed(2)} MB
+                {progress.percent != null ? ` · ${progress.percent}%` : ''}
+              </span>
+            </div>
+            <progress
+              className="w-full h-2 rounded overflow-hidden accent-[#0055A4]"
+              value={progress.percent != null ? progress.percent : undefined}
+              max={100}
+            />
+            <p className="text-[10px] text-sky-800/90">
+              Lote {progress.page}
+              {progress.total == null && progress.imported > 0
+                ? ' · sin conteo previo: barra indeterminada; confiá en filas y MB.'
+                : ''}
+            </p>
+          </div>
         )}
       </div>
       <div className="flex items-center gap-2 shrink-0">

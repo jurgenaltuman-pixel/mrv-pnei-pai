@@ -46,6 +46,20 @@ function openDB(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
+const textEncoder = new TextEncoder();
+
+/** Progreso de la descarga del padrón (filas, total estimado, peso aprox. de JSON). */
+export interface PadronDownloadProgress {
+  imported: number;
+  /** Total de filas en `base_personas` (conteo exacto vía Supabase); null si falló el conteo. */
+  total: number | null;
+  page: number;
+  /** Bytes UTF-8 aproximados acumulados del JSON recibido (por lote). */
+  bytesApprox: number;
+  /** 0–100 según filas importadas / total; null si no hay total. */
+  percent: number | null;
+}
+
 export interface PadronRow {
   id: string;
   nombre: string;
@@ -130,11 +144,44 @@ export const mrvPadronIndexed = {
     });
   },
 
-  async downloadFromServer(onProgress?: (p: { imported: number; page: number }) => void): Promise<{ imported: number; error?: string }> {
+  async downloadFromServer(onProgress?: (p: PadronDownloadProgress) => void): Promise<{ imported: number; error?: string }> {
     await this.clearAll();
     let imported = 0;
     let page = 0;
+    let bytesApprox = 0;
     const pageSize = 800;
+
+    let totalRows: number | null = null;
+    try {
+      const { count, error: countErr } = await supabase
+        .from('base_personas')
+        .select('id', { count: 'exact', head: true });
+      if (!countErr && typeof count === 'number' && count >= 0) totalRows = count;
+    } catch {
+      /* sin total: la UI muestra solo filas/MB */
+    }
+
+    const emit = () => {
+      const percent =
+        totalRows != null && totalRows > 0
+          ? Math.min(100, Math.round((imported / totalRows) * 100))
+          : null;
+      onProgress?.({
+        imported,
+        total: totalRows,
+        page: page + 1,
+        bytesApprox,
+        percent,
+      });
+    };
+
+    emit();
+
+    if (totalRows === 0) {
+      await this.setMeta({ rowCount: 0, complete: true });
+      return { imported: 0 };
+    }
+
     try {
       while (true) {
         const from = page * pageSize;
@@ -149,6 +196,7 @@ export const mrvPadronIndexed = {
           return { imported, error: error.message };
         }
         if (!data?.length) break;
+        bytesApprox += textEncoder.encode(JSON.stringify(data)).length;
         const batch: PadronRow[] = (data as Record<string, unknown>[]).map((raw) => ({
           id: stableId(raw as { id?: string; documento?: string; tipo_documento?: string }),
           nombre: String(raw.nombre ?? ''),
@@ -164,7 +212,7 @@ export const mrvPadronIndexed = {
         }));
         await this.putBatch(batch);
         imported += batch.length;
-        onProgress?.({ imported, page: page + 1 });
+        emit();
         if (batch.length < pageSize) break;
         page += 1;
         if (page > 5000) break;

@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, lazy, Suspense } from 'react';
+import { useState, useMemo, useEffect, useCallback, lazy, Suspense, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRole } from '@/hooks/useRole';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
@@ -441,6 +441,15 @@ export default function MainApp() {
   useEffect(() => {
     if (workflowStep > maxReachableStep) setWorkflowStep(maxReachableStep);
   }, [maxReachableStep, workflowStep]);
+
+  /** Si el usuario estaba en el último paso desbloqueado y se abre uno nuevo, avanzar el foco automáticamente. */
+  const prevMaxReachableRef = useRef(1);
+  useEffect(() => {
+    if (maxReachableStep > prevMaxReachableRef.current) {
+      setWorkflowStep((s) => (s === prevMaxReachableRef.current ? maxReachableStep : s));
+    }
+    prevMaxReachableRef.current = maxReachableStep;
+  }, [maxReachableStep]);
 
   const vacunacionSubStep =
     workflowStep === 2 ? 'validacion' as const :

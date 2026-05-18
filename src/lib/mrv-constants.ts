@@ -36,7 +36,7 @@ export function isFechaEnCampanaCvs(isoDate: string): boolean {
 
 export const WORKFLOW_STEPS = [
   { id: 1, label: 'Identificación', short: 'Niño/a' },
-  { id: 2, label: 'Validación', short: 'Documentos' },
+  { id: 2, label: 'Validación', short: 'Docs' },
   { id: 3, label: 'Evaluación CVS', short: 'CVS' },
   { id: 4, label: 'Justificación', short: 'Motivo' },
   { id: 5, label: 'Intervención', short: 'Acción' },

@@ -34,6 +34,9 @@ interface Props {
 
 type SearchMode = 'documento' | 'personales';
 
+/** Azul MSPBS (#0055A4): mismo tono en todos los navegadores (evita «morado» del tema). */
+const BTN_MRV = 'bg-[#0055A4] hover:bg-[#003d7a] text-white shadow-md';
+
 export default function ChildDataSection(props: Props) {
   const [sugerencias, setSugerencias] = useState<PersonaBase[]>([]);
   const [searching, setSearching] = useState(false);
@@ -161,27 +164,36 @@ export default function ChildDataSection(props: Props) {
             <div className="p-3 sm:p-4 space-y-3 bg-card">
               {searchMode === 'documento' ? (
                 <>
-                  <div className="grid grid-cols-1 min-[400px]:grid-cols-[minmax(0,5.5rem)_1fr] gap-2 gap-y-1 items-end">
+                  <div className="grid grid-cols-1 min-[400px]:grid-cols-[minmax(0,8.5rem)_1fr] gap-2 gap-y-1 items-end">
                     <div>
                       <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide block mb-1">
                         Tipo
                       </label>
-                      <select
-                        value={tipoDoc}
-                        onChange={(e) => {
-                          setTipoDoc(e.target.value);
-                          setDocBusqueda('');
-                          setSugerencias([]);
-                        }}
-                        className="w-full h-10 px-2 rounded-lg border bg-background text-sm font-bold tracking-wide text-center min-[400px]:text-left"
-                        title="Tipo de documento (catálogo nómina MRV)"
+                      <div
+                        className="flex rounded-lg border bg-background p-0.5 gap-0.5"
+                        role="group"
+                        aria-label="Tipo de documento"
                       >
                         {TIPOS_DOCUMENTO_MRV.map((t) => (
-                          <option key={t.value} value={t.value} title={t.descripcion}>
+                          <button
+                            key={t.value}
+                            type="button"
+                            title={t.descripcion}
+                            onClick={() => {
+                              setTipoDoc(t.value);
+                              setDocBusqueda('');
+                              setSugerencias([]);
+                            }}
+                            className={`flex-1 min-w-0 h-9 rounded-md text-xs font-black tracking-tight transition-colors ${
+                              tipoDoc === t.value
+                                ? 'bg-[#0055A4] text-white shadow-sm'
+                                : 'text-muted-foreground hover:bg-muted'
+                            }`}
+                          >
                             {t.label}
-                          </option>
+                          </button>
                         ))}
-                      </select>
+                      </div>
                     </div>
                     <div>
                       <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide block mb-1">
@@ -212,7 +224,7 @@ export default function ChildDataSection(props: Props) {
                     <button
                       type="button"
                       onClick={() => void buscarPorDocumento()}
-                      className="h-10 px-4 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-900 font-bold text-sm flex items-center gap-2 transition-colors"
+                      className={`h-10 px-4 rounded-lg font-bold text-sm flex items-center gap-2 transition-colors ${BTN_MRV}`}
                     >
                       <Search className="w-4 h-4" />
                       Buscar
@@ -225,7 +237,7 @@ export default function ChildDataSection(props: Props) {
                       setSearchMode('personales');
                       setSugerencias([]);
                     }}
-                    className="w-full h-11 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-sm flex items-center justify-center gap-2 shadow-md transition-colors"
+                    className={`w-full h-11 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-colors ${BTN_MRV}`}
                   >
                     <User className="w-5 h-5 shrink-0" />
                     Búsqueda por datos personales
@@ -318,7 +330,7 @@ export default function ChildDataSection(props: Props) {
                     <button
                       type="button"
                       onClick={() => void buscarDatosPersonales()}
-                      className="h-10 px-4 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-900 font-bold text-sm flex items-center gap-2 transition-colors"
+                      className={`h-10 px-4 rounded-lg font-bold text-sm flex items-center gap-2 transition-colors ${BTN_MRV}`}
                     >
                       <Search className="w-4 h-4" />
                       Buscar
@@ -335,7 +347,7 @@ export default function ChildDataSection(props: Props) {
                       setSearchMode('documento');
                       setSugerencias([]);
                     }}
-                    className="w-full h-11 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-sm flex items-center justify-center gap-2 shadow-md transition-colors"
+                    className={`w-full h-11 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-colors ${BTN_MRV}`}
                   >
                     <CreditCard className="w-5 h-5 shrink-0" />
                     Búsqueda por documento
