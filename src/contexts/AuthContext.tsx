@@ -555,20 +555,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!raw || !password) {
         return { ok: false, error: 'Ingresá usuario/correo y contraseña.' };
       }
-      let email = raw.includes('@') ? raw.trim().toLowerCase() : '';
-      if (!email) {
-        const { data } = await mrvApiFetch<{ email: string | null }>(
-          `/api/auth/resolve-email?username=${encodeURIComponent(raw.trim().toLowerCase())}`
-        );
-        email = data?.email || '';
-      }
-      if (!email.includes('@')) {
-        return { ok: false, error: 'No encontramos correo para ese usuario. Probá con el email completo.' };
-      }
-      const { data, error } = await mrvApiFetch<{ token: string; user: AuthUser }>('/api/auth/login', {
+      const normalized = raw.toLowerCase();
+      // Intento directo: el backend ya soporta email o username.
+      let { data, error } = await mrvApiFetch<{ token: string; user: AuthUser }>('/api/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: normalized, password }),
       });
+      // Fallback para instalaciones antiguas: resolver email por username y reintentar.
+      if ((!data?.token || error) && !normalized.includes('@')) {
+        const resolved = await mrvApiFetch<{ email: string | null }>(
+          `/api/auth/resolve-email?username=${encodeURIComponent(normalized)}`
+        );
+        const resolvedEmail = resolved.data?.email?.trim().toLowerCase() || '';
+        if (resolvedEmail.includes('@')) {
+          const retry = await mrvApiFetch<{ token: string; user: AuthUser }>('/api/auth/login', {
+            method: 'POST',
+            body: JSON.stringify({ email: resolvedEmail, password }),
+          });
+          data = retry.data;
+          error = retry.error;
+        }
+      }
       if (error || !data?.token) {
         return { ok: false, error: error || 'Credenciales inválidas' };
       }
