@@ -81,7 +81,11 @@ jobs:
           # Si el secreto no existe, no pisar los valores de .env.production con string vacío.
           if [ -z "${VITE_SUPABASE_URL:-}" ]; then unset VITE_SUPABASE_URL; fi
           if [ -z "${VITE_SUPABASE_PUBLISHABLE_KEY:-}" ]; then unset VITE_SUPABASE_PUBLISHABLE_KEY; fi
-          npm run build
+          npm run build || {
+            echo "::warning::Reintentando build tras instalar binarios opcionales de Rollup..."
+            npm install --no-save @rollup/rollup-linux-x64-gnu @rollup/rollup-linux-x64-musl @rollup/rollup-darwin-arm64 @rollup/rollup-darwin-x64 || true
+            npm run build
+          }
 
       - name: Verify web build output
         run: |
