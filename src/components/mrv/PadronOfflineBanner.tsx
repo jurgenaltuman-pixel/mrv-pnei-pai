@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Download, CheckCircle2, Loader2, X, WifiOff } from 'lucide-react';
+import { Download, CheckCircle2, Loader2, X, WifiOff, Wifi, Signal } from 'lucide-react';
+import { isNativeApp } from '@/lib/capacitor-platform';
 import { mrvPadronIndexed, type PadronDownloadProgress } from '@/services/mrvPadronIndexed';
+import { syncOrgStructureOffline, type OrgSyncResult } from '@/services/mrvOrgSync';
 import { useToast } from '@/hooks/use-toast';
 
 const DISMISS_KEY = 'mrv_padron_banner_dismissed';
@@ -9,28 +11,53 @@ interface Props {
   isOnline: boolean;
 }
 
+/** Descarga masiva del padrón solo en app nativa; en web la búsqueda va contra la API en línea. */
 export function PadronOfflineBanner({ isOnline }: Props) {
+  const native = isNativeApp();
   const { toast } = useToast();
   const [ready, setReady] = useState(false);
   const [dismissed, setDismissed] = useState(() => localStorage.getItem(DISMISS_KEY) === '1');
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState<PadronDownloadProgress | null>(null);
+  const [orgSync, setOrgSync] = useState<OrgSyncResult | null>(null);
+  const [networkType, setNetworkType] = useState<string>('unknown');
 
   const refresh = useCallback(() => {
     void mrvPadronIndexed.isReady().then(setReady);
   }, []);
 
   useEffect(() => {
+    if (!native) return;
     refresh();
     const onUpd = () => refresh();
     window.addEventListener('mrv-padron-updated', onUpd);
     return () => window.removeEventListener('mrv-padron-updated', onUpd);
-  }, [refresh]);
+  }, [refresh, native]);
+
+  useEffect(() => {
+    if (!native) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { Network } = await import('@capacitor/network');
+        const s = await Network.getStatus();
+        if (!cancelled) setNetworkType((s.connectionType || 'unknown').toLowerCase());
+      } catch {
+        if (!cancelled) setNetworkType('unknown');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [native]);
+
+  if (!native) return null;
 
   const handleDownload = async () => {
     if (!isOnline || downloading) return;
     setDownloading(true);
     setProgress({ imported: 0, total: null, page: 0, bytesApprox: 0, percent: null });
+    setOrgSync(null);
     try {
       const res = await mrvPadronIndexed.downloadFromServer((p) => setProgress(p));
       if (res.error) {
@@ -40,9 +67,11 @@ export function PadronOfflineBanner({ isOnline }: Props) {
           variant: 'destructive',
         });
       } else {
+        const org = await syncOrgStructureOffline();
+        setOrgSync(org);
         toast({
-          title: 'Padrón guardado en el dispositivo',
-          description: `${res.imported.toLocaleString('es-PY')} personas listas para búsqueda sin conexión.`,
+          title: 'Datos offline listos',
+          description: `${res.imported.toLocaleString('es-PY')} personas + estructura territorial (región, distrito, servicio y barrio).`,
         });
       }
       window.dispatchEvent(new Event('mrv-padron-updated'));
@@ -59,7 +88,7 @@ export function PadronOfflineBanner({ isOnline }: Props) {
     }
   };
 
-  if (dismissed) return null;
+  if (dismissed && ready) return null;
   if (ready) {
     return (
       <div className="mx-3 sm:mx-5 mt-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 flex items-center gap-2 text-xs text-emerald-950">
@@ -99,8 +128,16 @@ export function PadronOfflineBanner({ isOnline }: Props) {
       <div className="flex-1 min-w-0">
         <p className="font-bold text-sky-950">Trabajo sin conexión — padrón nominal</p>
         <p className="mt-0.5 opacity-90">
-          Descargá las personas autorizadas en tu dispositivo para que la búsqueda por documento o datos personales
-          funcione en terreno sin señal (requiere espacio libre y unos minutos con WiFi/datos).
+          Apenas iniciás sesión, descargá los datos locales para trabajar sin señal: padrón nominal y unidad
+          organizativa (región, distrito, servicio y barrio).
+        </p>
+        <p className="mt-1 text-[10px] flex items-center gap-1.5">
+          {networkType === 'wifi' ? <Wifi className="w-3.5 h-3.5" /> : <Signal className="w-3.5 h-3.5" />}
+          <span>
+            {networkType === 'wifi'
+              ? 'Conectado por Wi-Fi: recomendado para esta descarga.'
+              : 'Recomendado por Wi-Fi; igual podés descargar con datos móviles.'}
+          </span>
         </p>
         {downloading && progress && (
           <div className="mt-2 space-y-1.5" aria-live="polite">
@@ -113,7 +150,10 @@ export function PadronOfflineBanner({ isOnline }: Props) {
                     : 'Contando filas en el servidor…'}
               </span>
               <span className="font-mono tabular-nums shrink-0">
-                {(progress.bytesApprox / (1024 * 1024)).toFixed(2)} MB
+                {(
+                  (progress.bytesApprox + (orgSync?.bytesApprox || 0)) /
+                  (1024 * 1024)
+                ).toFixed(2)} MB
                 {progress.percent != null ? ` · ${progress.percent}%` : ''}
               </span>
             </div>
@@ -128,6 +168,12 @@ export function PadronOfflineBanner({ isOnline }: Props) {
                 ? ' · sin conteo previo: barra indeterminada; confiá en filas y MB.'
                 : ''}
             </p>
+            {orgSync && (
+              <p className="text-[10px] text-sky-800/90">
+                Estructura territorial: {orgSync.regiones} regiones, {orgSync.distritos} distritos, {orgSync.barrios}{' '}
+                barrios.
+              </p>
+            )}
           </div>
         )}
       </div>
@@ -143,7 +189,7 @@ export function PadronOfflineBanner({ isOnline }: Props) {
         </button>
         <button
           type="button"
-          className="p-2 rounded-lg border bg-white/80 text-muted-foreground hover:text-foreground"
+          className="p-2 rounded-lg border border-border bg-card/80 text-muted-foreground hover:text-foreground"
           aria-label="Cerrar aviso"
           onClick={() => {
             localStorage.setItem(DISMISS_KEY, '1');
