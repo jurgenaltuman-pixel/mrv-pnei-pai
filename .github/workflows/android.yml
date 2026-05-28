@@ -96,6 +96,7 @@ jobs:
         run: npx cap doctor || true
 
       - name: Capacitor sync Android
+        id: cap_sync
         run: |
           set -euxo pipefail
           sed -i 's/\r$//' android/gradlew scripts/ci-android-signing.sh scripts/ci-cap-sync.sh 2>/dev/null || true
@@ -125,7 +126,7 @@ jobs:
             --no-daemon
 
       - name: Build Debug APK
-        if: always()
+        if: ${{ success() || steps.release_build.outcome == 'failure' }}
         working-directory: android
         run: ./gradlew assembleDebug --build-cache --no-daemon
 
