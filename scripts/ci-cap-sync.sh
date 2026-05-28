@@ -17,3 +17,10 @@ trap cleanup EXIT
 
 npx cap copy "$PLATFORM"
 npx cap update "$PLATFORM"
+
+# En proyectos sin plugins Cordova, Gradle puede referenciar este archivo igualmente.
+# Evita fallo en CI: "cordova.variables.gradle ... does not exist".
+if [[ "$PLATFORM" == "android" ]]; then
+  mkdir -p android/capacitor-cordova-android-plugins
+  : > android/capacitor-cordova-android-plugins/cordova.variables.gradle
+fi
