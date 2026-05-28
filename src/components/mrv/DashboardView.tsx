@@ -13,6 +13,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useRole } from '@/hooks/useRole';
 import { useRegistrosQuery } from '@/hooks/useRegistrosQuery';
 import { buildDashboardData } from '@/lib/dashboard-stats';
+import { aggregateRoundsByServicio } from '@/lib/round-dashboard-stats';
+import { fetchAdminRoundHistory, fetchMyRoundHistory } from '@/services/roundHistoryApi';
 import { contadorDesdeDashboard } from '@/lib/housing-stats';
 import HousingStatsPanel from '@/components/mrv/HousingStatsPanel';
 import type { DashboardData, RegistroMRV } from '@/services/dataService';
@@ -84,6 +86,7 @@ export default function DashboardView() {
   const [chartMode, setChartMode] = useState<'stacked' | 'coverage'>('stacked');
   const [exporting, setExporting] = useState(false);
   const [jornadaStats, setJornadaStats] = useState(() => getJornadaStats(''));
+  const [roundsByServicio, setRoundsByServicio] = useState<ReturnType<typeof aggregateRoundsByServicio>>([]);
 
   const refreshJornada = useCallback(() => {
     if (!user?.id) return;
@@ -93,6 +96,14 @@ export default function DashboardView() {
   useEffect(() => {
     refreshJornada();
   }, [refreshJornada]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    void (async () => {
+      const rows = isAdmin || isSuperAdmin ? await fetchAdminRoundHistory() : await fetchMyRoundHistory();
+      setRoundsByServicio(aggregateRoundsByServicio(rows));
+    })();
+  }, [user?.id, isAdmin, isSuperAdmin]);
 
   useEffect(() => {
     const onVisible = () => {
@@ -154,10 +165,11 @@ export default function DashboardView() {
   );
 
   const data = useMemo(() => buildDashboardData(registrosFiltrados), [registrosFiltrados]);
+  const registrosMapa = useMemo(() => registrosFiltrados, [registrosFiltrados]);
   const total = data.totalVacunados + data.totalNoVacunados;
   const cobertura = total > 0 ? ((data.totalVacunados / total) * 100).toFixed(1) : '0';
   const contadorViviendas = contadorDesdeDashboard(data.viviendas);
-  const conGps = registrosFiltrados.filter((r) => r.latitud != null && r.longitud != null).length;
+  const conGps = registrosMapa.filter((r) => r.latitud != null && r.longitud != null).length;
 
   if (isLoading) return <PageSkeleton rows={5} />;
 
@@ -388,7 +400,7 @@ export default function DashboardView() {
         </div>
         {conGps > 0 ? (
           <Suspense fallback={<PageSkeleton rows={1} />}>
-            <MrvMapPanel registros={registrosFiltrados} height="280px" maxMarkers={150} showLegend />
+            <MrvMapPanel registros={registrosMapa} height="280px" maxMarkers={150} showLegend />
           </Suspense>
         ) : (
           <p className="text-xs text-muted-foreground text-center py-8 px-4">
@@ -411,7 +423,7 @@ export default function DashboardView() {
         </div>
       ) : (
         <Suspense fallback={<PageSkeleton rows={2} />}>
-          <DashboardCharts data={data} chartMode={chartMode} />
+          <DashboardCharts data={data} chartMode={chartMode} roundsByServicio={roundsByServicio} />
         </Suspense>
       )}
 

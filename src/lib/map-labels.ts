@@ -9,6 +9,7 @@ export function registroMapLabelHtml(r: RegistroMRV): string {
   const barrio = r.barrio?.trim() || '—';
   const distrito = r.distrito?.trim() || '—';
   const servicio = r.servicio?.trim();
+  const responsable = r.responsable?.trim();
   const motivo =
     r.motivo && r.motivo.length > 60 ? `${r.motivo.slice(0, 57)}…` : r.motivo?.trim();
 
@@ -19,6 +20,7 @@ export function registroMapLabelHtml(r: RegistroMRV): string {
     `<span class="mrv-label-meta">${escapeHtml(distrito)} · ${escapeHtml(barrio)}</span>`,
   ];
   if (servicio) lines.push(`<span class="mrv-label-meta">${escapeHtml(servicio)}</span>`);
+  if (responsable) lines.push(`<span class="mrv-label-meta">Responsable: ${escapeHtml(responsable)}</span>`);
   if (motivo) lines.push(`<span class="mrv-label-motivo">${escapeHtml(motivo)}</span>`);
 
   return `<div class="mrv-map-label-inner">${lines.join('')}</div>`;

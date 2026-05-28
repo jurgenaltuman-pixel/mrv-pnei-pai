@@ -15,7 +15,8 @@ export default function MapView() {
 
   const filtrados = useMemo(() => {
     if (filtro === 'todos') return registros;
-    return registros.filter((r) => r.estado_vacuna === filtro);
+    if (filtro === 'vacunado') return registros.filter((r) => r.estado_vacuna === 'vacunado');
+    return registros.filter((r) => r.estado_vacuna === 'no_vacunado');
   }, [registros, filtro]);
 
   const geoCount = filtrados.filter((r) => r.latitud != null && r.longitud != null).length;

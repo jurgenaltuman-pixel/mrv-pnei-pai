@@ -76,6 +76,7 @@ export default function LoginPage() {
   const [signupRegion, setSignupRegion] = useState('');
   const [signupDistrito, setSignupDistrito] = useState('');
   const [signupServicio, setSignupServicio] = useState('');
+  const [manualSignupOpen, setManualSignupOpen] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricReady, setBiometricReady] = useState(false);
   const [rememberBiometric, setRememberBiometric] = useState(true);
@@ -161,9 +162,17 @@ export default function LoginPage() {
         assigned_region: signupRegion,
         assigned_distrito: signupDistrito,
         assigned_servicio: signupServicio || undefined,
+        from_nomina: nominaMatched,
+        nomina_documento: doc,
       });
       if (!result.ok) setError(result.error || 'Error al registrarse');
-      else setSuccess('✅ Cuenta creada exitosamente. Puede iniciar sesión ahora.');
+      else if (result.autoApproved) {
+        setSuccess('✅ Registro desde nómina completado. Ya podés ingresar sin esperar aprobación.');
+      } else {
+        setSuccess(
+          '✅ Solicitud enviada. Un administrador debe aprobar tu cuenta antes del primer ingreso.'
+        );
+      }
     } else {
       const result = await login(identifier, password);
       if (!result.ok) {
@@ -310,6 +319,7 @@ export default function LoginPage() {
     if (user.assigned_servicio) setSignupServicio(user.assigned_servicio);
     setCiFound(user);
     setNominaMatched(true);
+    setManualSignupOpen(true);
     setSuggestions([]);
     setSearchQuery('');
   };
@@ -337,6 +347,7 @@ export default function LoginPage() {
     setUsername('');
     setCiFound(null);
     setNominaMatched(false);
+    setManualSignupOpen(false);
     setSearchError('');
     setLastSearchedQuery('');
     setSignupRegion('');
@@ -562,13 +573,29 @@ export default function LoginPage() {
                 )}
 
                 {searchQuery.trim().length >= minCharsForSignupSearch(searchQuery) && lastSearchedQuery === searchQuery.trim() && suggestions.length === 0 && !searchingUsers && !searchError && (
-                  <div className="mt-2 p-3 bg-amber-50 rounded-lg border border-amber-200 flex gap-2 text-xs">
-                    <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
-                    <div className="flex-1">
-                      <p className="font-semibold text-amber-800">⚠️ No encontrado en nómina</p>
-                      <p className="text-amber-700">No hay coincidencias para «{searchQuery.trim()}». Completá los datos manualmente abajo y elegí región, distrito y servicio de salud.</p>
-                      <p className="text-amber-600 mt-1 font-semibold">💡 Tip: Enter o 🔍 para buscar de nuevo</p>
+                  <div className="mt-2 p-3 bg-amber-50 rounded-lg border border-amber-200 flex flex-col gap-2 text-xs">
+                    <div className="flex gap-2">
+                      <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                      <div className="flex-1">
+                        <p className="font-semibold text-amber-800">No encontrado en nómina</p>
+                        <p className="text-amber-700">
+                          No hay coincidencias para «{searchQuery.trim()}». Podés registrarte manualmente; requerirá
+                          aprobación del administrador.
+                        </p>
+                      </div>
                     </div>
+                    {!manualSignupOpen && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setManualSignupOpen(true);
+                          setNominaMatched(false);
+                        }}
+                        className="w-full h-9 rounded-lg bg-primary text-primary-foreground font-bold text-sm"
+                      >
+                        Agregar manualmente y completar formulario
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -584,6 +611,8 @@ export default function LoginPage() {
                 )}
               </div>
 
+              {(manualSignupOpen || nominaMatched || ci.trim().length >= 5) && (
+              <>
               <div>
                 <label className="field-label flex items-center gap-1">
                   <CreditCard className="w-3 h-3" /> Documento / CI <span className="text-destructive">*</span>
@@ -693,6 +722,8 @@ export default function LoginPage() {
                   </select>
                 </div>
               </div>
+              </>
+              )}
             </>
           )}
 

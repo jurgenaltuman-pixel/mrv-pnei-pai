@@ -18,7 +18,9 @@ export function computeCoberturaVacunacion(vacunados: number, totalNinos: number
 
 export function evaluateRoundMonitoring(summary: RoundSummary): RoundEvaluation {
   const coberturaVacunacion = computeCoberturaVacunacion(summary.vacunados, summary.totalNinos);
-  const rondaCompleta = summary.efectivas >= summary.totalCasas;
+  // La ronda se considera completa cuando se visitaron todas las casas asignadas.
+  // "efectivas" depende del resultado de campo y no debe bloquear el cierre.
+  const rondaCompleta = summary.visitadas >= summary.totalCasas;
 
   const aprobado =
     rondaCompleta &&

@@ -283,6 +283,9 @@ export interface DashboardData {
   totalVacunados: number;
   totalNoVacunados: number;
   porDistrito: Record<string, { vacunados: number; noVacunados: number }>;
+  porResponsable?: Record<string, { vacunados: number; noVacunados: number }>;
+  porServicio?: Record<string, { vacunados: number; noVacunados: number }>;
+  porBarrio?: Record<string, { vacunados: number; noVacunados: number }>;
   viviendas: {
     efectiva: number;
     revisitada: number;
@@ -803,7 +806,7 @@ export const dataService = {
     const digits = normalizeNominaDocumento(trimmed);
     const hasLetter = /[A-Za-zÁÉÍÓÚáéíóúÑñ]/.test(trimmed);
     if (!hasLetter && digits.length < 5) return [];
-    if (hasLetter && trimmed.length < 4 && !trimmed.includes(' ')) return [];
+    if (hasLetter && trimmed.length < 3 && !trimmed.includes(' ')) return [];
     const limit = Math.min(20, options?.limit ?? 12);
     if (USE_MRV_API) {
       const base = import.meta.env.VITE_MRV_API_URL ?? '';

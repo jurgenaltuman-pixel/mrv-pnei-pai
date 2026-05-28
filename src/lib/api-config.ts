@@ -143,9 +143,15 @@ export async function mrvApiFetch<T = unknown>(
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const url = `${MRV_API_URL}${path.startsWith('/') ? path : `/${path}`}`;
+  const method = (init.method || 'GET').toUpperCase();
+
+  async function doFetch(): Promise<Response> {
+    return fetch(url, { ...init, headers });
+  }
+
   let res: Response;
   try {
-    res = await fetch(url, { ...init, headers });
+    res = await doFetch();
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     const hint =
@@ -154,6 +160,18 @@ export async function mrvApiFetch<T = unknown>(
         : msg;
     return { error: hint, status: 0 };
   }
+
+  if (res.status === 429 && method === 'GET') {
+    const retrySec = Number(res.headers.get('Retry-After')) || 3;
+    await new Promise((r) => setTimeout(r, Math.min(30, retrySec) * 1000));
+    try {
+      res = await doFetch();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { error: msg, status: 0 };
+    }
+  }
+
   let body: { error?: string; [k: string]: unknown } = {};
   try {
     body = await res.json();

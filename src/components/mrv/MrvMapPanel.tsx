@@ -5,6 +5,7 @@ import 'leaflet/dist/leaflet.css';
 import type { RegistroMRV } from '@/services/dataService';
 import { MAP_ATTRIBUTION, MAP_CENTER_PY, MAP_DEFAULT_ZOOM, MAP_TILE_URL } from '@/lib/map-config';
 import { registroMapLabelHtml } from '@/lib/map-labels';
+import { normalizeTipoVivienda } from '@/lib/dashboard-stats';
 import { MapPin } from 'lucide-react';
 
 type GeoRegistro = RegistroMRV & { lat: number; lng: number };
@@ -21,6 +22,14 @@ interface Props {
 
 function registroKey(r: GeoRegistro) {
   return r.id || `${r.documento}-${r.lat}-${r.lng}`;
+}
+
+function getMarkerFillColor(r: GeoRegistro): string {
+  const tipo = normalizeTipoVivienda(r.tipo_vivienda);
+  if (tipo === 'revisitada') return '#f59e0b'; // N
+  if (tipo === 'sin_adulto_responsable') return '#2563eb'; // F
+  if (tipo === 'renuente') return '#7c3aed'; // R
+  return r.estado_vacuna === 'vacunado' ? '#16a34a' : '#dc2626'; // E
 }
 
 function FitBoundsOnLoad({ points }: { points: [number, number][] }) {
@@ -145,7 +154,6 @@ export default function MrvMapPanel({
         )}
 
         {geo.map((r) => {
-          const vac = r.estado_vacuna === 'vacunado';
           const key = registroKey(r);
           const isOpen = selectedKey === key;
           return (
@@ -156,7 +164,7 @@ export default function MrvMapPanel({
               pathOptions={{
                 color: isOpen ? '#0055A4' : '#fff',
                 weight: isOpen ? 3 : 2,
-                fillColor: vac ? '#16a34a' : '#dc2626',
+                fillColor: getMarkerFillColor(r),
                 fillOpacity: 0.92,
               }}
               eventHandlers={{
@@ -174,10 +182,19 @@ export default function MrvMapPanel({
         <div className="absolute bottom-3 left-3 right-3 sm:right-auto z-[1000] flex flex-col sm:flex-row gap-1.5 sm:items-center sm:gap-2 pointer-events-none">
           <div className="flex gap-2 rounded-xl bg-card/95 backdrop-blur px-3 py-1.5 text-[10px] font-bold shadow border w-fit">
             <span className="flex items-center gap-1">
-              <span className="w-2.5 h-2.5 rounded-full bg-success" /> Vacunado
+              <span className="w-2.5 h-2.5 rounded-full bg-success" /> E vacunado
             </span>
             <span className="flex items-center gap-1">
-              <span className="w-2.5 h-2.5 rounded-full bg-destructive" /> No vac.
+              <span className="w-2.5 h-2.5 rounded-full bg-destructive" /> E no vac.
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: '#f59e0b' }} /> N
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: '#2563eb' }} /> F
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: '#7c3aed' }} /> R
             </span>
           </div>
           <span className="text-[9px] text-muted-foreground bg-card/90 rounded-lg px-2 py-1 border shadow-sm w-fit">

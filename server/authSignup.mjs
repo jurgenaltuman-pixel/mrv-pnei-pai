@@ -1,0 +1,202 @@
+import { randomUUID } from 'crypto';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { query } from './db.mjs';
+import { validateStrongPassword } from './passwordPolicy.mjs';
+import { getJwtSecret } from './authUtils.mjs';
+
+const JWT_EXPIRES_IN = '7d';
+
+function digitsOnly(v) {
+  return String(v || '').replace(/\D/g, '');
+}
+
+async function hasCredentials(userId) {
+  const { rows } = await query(`SELECT 1 FROM auth_credentials WHERE user_id = $1 LIMIT 1`, [userId]);
+  return rows.length > 0;
+}
+
+/** Perfil precargado en nómina (import) sin cuenta activa aún. */
+async function findNominaPreload(docDigits) {
+  if (docDigits.length < 4) return null;
+  const { rows } = await query(
+    `SELECT user_id, email, username, display_name, assigned_region, assigned_distrito, assigned_servicio,
+            nomina_documento, is_approved
+     FROM profiles
+     WHERE is_active = true
+       AND (
+         nomina_documento = $1
+         OR regexp_replace(COALESCE(username, ''), '[^0-9]', '', 'g') = $1
+       )
+       AND (
+         nomina_documento IS NOT NULL
+         OR length(regexp_replace(COALESCE(username, ''), '[^0-9]', '', 'g')) >= 5
+       )
+     ORDER BY (nomina_documento IS NOT NULL) DESC, updated_at DESC NULLS LAST
+     LIMIT 1`,
+    [docDigits]
+  );
+  return rows[0] || null;
+}
+
+async function findProfilesByEmailOrUsername(em, un) {
+  const { rows } = await query(
+    `SELECT user_id, email, username, display_name, nomina_documento, is_approved,
+            assigned_region, assigned_distrito, assigned_servicio
+     FROM profiles
+     WHERE lower(trim(email)) = $1 OR lower(trim(username)) = $2
+     ORDER BY is_active DESC, updated_at DESC NULLS LAST
+     LIMIT 5`,
+    [em, un]
+  );
+  return rows;
+}
+
+export async function handleAuthSignup(body) {
+  const {
+    email,
+    password,
+    displayName,
+    username,
+    assigned_region,
+    assigned_distrito,
+    assigned_servicio,
+    from_nomina,
+    nomina_documento,
+  } = body || {};
+
+  const em = String(email || '').trim().toLowerCase();
+  const un = String(username || '').trim().toLowerCase();
+  if (!em.includes('@') || !password || !un) {
+    return { status: 400, body: { error: 'Datos de registro incompletos' } };
+  }
+  const pwErr = validateStrongPassword(password);
+  if (pwErr) return { status: 400, body: { error: pwErr } };
+
+  const docDigits = digitsOnly(nomina_documento) || digitsOnly(un);
+  const fromNomina = Boolean(from_nomina);
+  const nominaPreload = await findNominaPreload(docDigits);
+  const autoApprove = fromNomina || Boolean(nominaPreload?.nomina_documento);
+
+  let assignedRegion = String(assigned_region || '').trim() || null;
+  let assignedDistrito = String(assigned_distrito || '').trim() || null;
+  let assignedServicio = String(assigned_servicio || '').trim() || null;
+
+  if (nominaPreload) {
+    if (!assignedRegion) assignedRegion = nominaPreload.assigned_region?.trim() || null;
+    if (!assignedDistrito) assignedDistrito = nominaPreload.assigned_distrito?.trim() || null;
+    if (!assignedServicio) assignedServicio = nominaPreload.assigned_servicio?.trim() || null;
+  }
+
+  const scopeLocked = autoApprove && Boolean(assignedRegion && assignedDistrito);
+  const hash = await bcrypt.hash(password, 10);
+  const now = new Date().toISOString();
+  const nominaDocStored = docDigits.length >= 4 ? docDigits : null;
+
+  const candidates = await findProfilesByEmailOrUsername(em, un);
+  for (const p of candidates) {
+    if (await hasCredentials(p.user_id)) {
+      return {
+        status: 409,
+        body: { error: 'Correo o usuario ya registrado. Usá «Ingresar» si ya tenés cuenta.' },
+      };
+    }
+  }
+
+  let claim = null;
+  for (const p of candidates) {
+    if (!(await hasCredentials(p.user_id))) {
+      claim = p;
+      break;
+    }
+  }
+  if (!claim && nominaPreload && !(await hasCredentials(nominaPreload.user_id))) {
+    claim = nominaPreload;
+  }
+
+  let userId;
+  if (claim) {
+    userId = claim.user_id;
+    await query(
+      `UPDATE profiles SET
+         email = $2,
+         username = $3,
+         display_name = $4,
+         is_active = true,
+         is_approved = $5,
+         must_change_password = false,
+         assigned_region = COALESCE($6, assigned_region),
+         assigned_distrito = COALESCE($7, assigned_distrito),
+         assigned_servicio = COALESCE($8, assigned_servicio),
+         nomina_documento = COALESCE($9, nomina_documento),
+         scope_locked = $10,
+         approved_at = CASE WHEN $5 THEN COALESCE(approved_at, now()) ELSE approved_at END,
+         updated_at = $11
+       WHERE user_id = $1`,
+      [
+        userId,
+        em,
+        un,
+        displayName || un,
+        autoApprove,
+        assignedRegion,
+        assignedDistrito,
+        assignedServicio,
+        nominaDocStored,
+        scopeLocked,
+        now,
+      ]
+    );
+    await query(
+      `INSERT INTO auth_credentials (user_id, email, password_hash) VALUES ($1,$2,$3)
+       ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email, password_hash = EXCLUDED.password_hash`,
+      [userId, em, hash]
+    );
+    await query(`INSERT INTO user_roles (user_id, role) VALUES ($1,'user') ON CONFLICT DO NOTHING`, [userId]);
+  } else {
+    userId = randomUUID();
+    await query(
+      `INSERT INTO profiles (
+         user_id, email, username, display_name, is_active, is_approved, must_change_password,
+         assigned_region, assigned_distrito, assigned_servicio, nomina_documento, scope_locked,
+         approved_at, created_at, updated_at
+       ) VALUES ($1,$2,$3,$4,true,$5,false,$6,$7,$8,$9,$10, CASE WHEN $5 THEN now() ELSE NULL END, $11,$11)`,
+      [
+        userId,
+        em,
+        un,
+        displayName || un,
+        autoApprove,
+        assignedRegion,
+        assignedDistrito,
+        assignedServicio,
+        nominaDocStored,
+        scopeLocked,
+        now,
+      ]
+    );
+    await query(
+      `INSERT INTO auth_credentials (user_id, email, password_hash) VALUES ($1,$2,$3)
+       ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email, password_hash = EXCLUDED.password_hash`,
+      [userId, em, hash]
+    );
+    await query(`INSERT INTO user_roles (user_id, role) VALUES ($1,'user') ON CONFLICT DO NOTHING`, [userId]);
+  }
+
+  const token = jwt.sign({ sub: userId, email: em }, getJwtSecret(), { expiresIn: JWT_EXPIRES_IN });
+  return {
+    status: 200,
+    body: {
+      token,
+      user: {
+        id: userId,
+        email: em,
+        nombre: displayName || un,
+        username: un,
+        is_approved: autoApprove,
+        must_change_password: false,
+      },
+      auto_approved: autoApprove,
+    },
+  };
+}

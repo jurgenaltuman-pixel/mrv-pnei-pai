@@ -37,8 +37,14 @@ interface AuthContextType {
     password: string,
     displayName: string,
     username: string,
-    scope?: { assigned_region?: string; assigned_distrito?: string; assigned_servicio?: string }
-  ) => Promise<{ ok: boolean; error?: string }>;
+    scope?: {
+      assigned_region?: string;
+      assigned_distrito?: string;
+      assigned_servicio?: string;
+      from_nomina?: boolean;
+      nomina_documento?: string;
+    }
+  ) => Promise<{ ok: boolean; error?: string; autoApproved?: boolean }>;
   changePassword: (newPassword: string) => Promise<{ ok: boolean; error?: string }>;
   logout: () => void;
 }
@@ -684,7 +690,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     password: string,
     displayName: string,
     username: string,
-    scope?: { assigned_region?: string; assigned_distrito?: string; assigned_servicio?: string }
+    scope?: {
+      assigned_region?: string;
+      assigned_distrito?: string;
+      assigned_servicio?: string;
+      from_nomina?: boolean;
+      nomina_documento?: string;
+    }
   ) => {
     if (USE_MRV_API) {
       const normalizedEmail = email.trim().toLowerCase();
@@ -693,7 +705,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!isValidEmail(normalizedEmail)) return { ok: false, error: 'Correo inválido.' };
       const pwErr = validateStrongPassword(password);
       if (pwErr) return { ok: false, error: pwErr };
-      const { data, error } = await mrvApiFetch<{ token: string; user: AuthUser }>('/api/auth/signup', {
+      const { data, error } = await mrvApiFetch<{
+        token: string;
+        user: AuthUser & { is_approved?: boolean };
+        auto_approved?: boolean;
+      }>('/api/auth/signup', {
         method: 'POST',
         body: JSON.stringify({
           email: normalizedEmail,
@@ -703,14 +719,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           assigned_region: scope?.assigned_region?.trim() || null,
           assigned_distrito: scope?.assigned_distrito?.trim() || null,
           assigned_servicio: scope?.assigned_servicio?.trim() || null,
+          from_nomina: Boolean(scope?.from_nomina),
+          nomina_documento: scope?.nomina_documento?.trim() || null,
         }),
       });
       if (error) return { ok: false, error };
       if (data?.token) {
         setApiToken(data.token);
         if (data.user) saveUserSnapshot(data.user);
+        setApprovalPending(!data.user?.is_approved && !data.auto_approved);
       }
-      return { ok: true };
+      return { ok: true, autoApproved: Boolean(data?.auto_approved || data?.user?.is_approved) };
     }
 
     const normalizedEmail = email.trim().toLowerCase();

@@ -5,6 +5,7 @@
 import { supabase } from '@/integrations/supabase/client';
 import { USE_MRV_API, USE_SUPABASE_PADRON } from '@/lib/api-config';
 import { extractSexoFromPadronRow } from '@/lib/persona-sexo';
+import { padronDownloadPageDelayMs, padronDownloadStartDelayMs, sleep } from '@/lib/padron-download-delay';
 import { fetchPadronCount, fetchPadronPage } from '@/services/mrvBackend';
 
 const DB_NAME = 'mrv_padron';
@@ -185,6 +186,8 @@ export const mrvPadronIndexed = {
 
     emit();
 
+    await sleep(padronDownloadStartDelayMs());
+
     if (totalRows === 0) {
       await this.setMeta({ rowCount: 0, complete: true });
       return { imported: 0 };
@@ -234,6 +237,7 @@ export const mrvPadronIndexed = {
         if (batch.length < pageSize) break;
         page += 1;
         if (page > 5000) break;
+        await sleep(padronDownloadPageDelayMs());
       }
       await this.setMeta({ rowCount: imported, complete: true });
       return { imported };
