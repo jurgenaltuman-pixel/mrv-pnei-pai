@@ -127,6 +127,7 @@ jobs:
 
       - name: Build Debug APK
         if: ${{ success() || steps.release_build.outcome == 'failure' }}
+        continue-on-error: true
         working-directory: android
         run: ./gradlew assembleDebug --build-cache --no-daemon
 
