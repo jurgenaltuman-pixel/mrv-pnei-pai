@@ -22,5 +22,14 @@ npx cap update "$PLATFORM"
 # Evita fallo en CI: "cordova.variables.gradle ... does not exist".
 if [[ "$PLATFORM" == "android" ]]; then
   mkdir -p android/capacitor-cordova-android-plugins
-  : > android/capacitor-cordova-android-plugins/cordova.variables.gradle
+  VARS_FILE="android/capacitor-cordova-android-plugins/cordova.variables.gradle"
+  # En algunos entornos Capacitor/Cordova no define este arreglo y Gradle rompe:
+  # "Could not get unknown property 'cdvPluginPostBuildExtras'".
+  if [[ ! -f "$VARS_FILE" ]]; then
+    cat > "$VARS_FILE" <<'EOF'
+ext.cdvPluginPostBuildExtras = []
+EOF
+  elif ! grep -q "cdvPluginPostBuildExtras" "$VARS_FILE"; then
+    printf "\next.cdvPluginPostBuildExtras = []\n" >> "$VARS_FILE"
+  fi
 fi
