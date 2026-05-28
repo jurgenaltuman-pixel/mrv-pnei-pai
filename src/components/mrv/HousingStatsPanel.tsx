@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { DoorOpen, DoorClosed, HelpCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { DoorOpen, CircleX, HelpCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import {
   TIPOS_VIVIENDA,
   resumenAbiertasCerradas,
@@ -16,7 +16,7 @@ interface Props {
 
 export default function HousingStatsPanel({ contador, variant = 'full', showHelp = true }: Props) {
   const [helpOpen, setHelpOpen] = useState(false);
-  const { abiertas, cerradas, total, pctAbiertas, pctCerradas } = resumenAbiertasCerradas(contador);
+  const { abiertas, fallidas, total, pctAbiertas, pctFallidas } = resumenAbiertasCerradas(contador);
 
   if (total === 0 && variant === 'compact') {
     return (
@@ -29,7 +29,7 @@ export default function HousingStatsPanel({ contador, variant = 'full', showHelp
   return (
     <div className="space-y-3">
       {/* Resumen principal: lo que pide el informe */}
-      <div className="rounded-xl border-2 border-primary/20 bg-gradient-to-r from-primary/5 to-transparent p-3">
+      <div className="rounded-xl border-2 border-primary/20 dark:border-primary/30 bg-gradient-to-r from-primary/5 to-transparent dark:from-primary/10 p-3">
         <p className="text-[11px] font-bold uppercase text-primary mb-2 tracking-wide">
           Resumen de la jornada (viviendas)
         </p>
@@ -41,23 +41,23 @@ export default function HousingStatsPanel({ contador, variant = 'full', showHelp
             </div>
             <p className="text-3xl font-black text-success leading-none">{abiertas}</p>
             <p className="text-[10px] text-muted-foreground mt-1.5 leading-snug">
-              Entró o hubo contacto (E + F + R)
+              Entró o hubo contacto (E + R)
             </p>
             {total > 0 && (
               <p className="text-[10px] font-semibold text-success/80 mt-1">{pctAbiertas}% del total</p>
             )}
           </div>
-          <div className="rounded-lg bg-warning/10 border border-warning/30 p-3">
+          <div className="rounded-lg bg-destructive/10 border border-destructive/30 p-3">
             <div className="flex items-center gap-2 mb-1">
-              <DoorClosed className="w-5 h-5 text-warning" />
-              <span className="text-xs font-bold text-warning">Cerradas</span>
+              <CircleX className="w-5 h-5 text-destructive" />
+              <span className="text-xs font-bold text-destructive">Fallida</span>
             </div>
-            <p className="text-3xl font-black text-warning leading-none">{cerradas}</p>
+            <p className="text-3xl font-black text-destructive leading-none">{fallidas}</p>
             <p className="text-[10px] text-muted-foreground mt-1.5 leading-snug">
-              No se pudo abordar (solo N)
+              Casa cerrada o sin abordar (F + N)
             </p>
             {total > 0 && (
-              <p className="text-[10px] font-semibold text-warning/80 mt-1">{pctCerradas}% del total</p>
+              <p className="text-[10px] font-semibold text-destructive/80 mt-1">{pctFallidas}% del total</p>
             )}
           </div>
         </div>
@@ -76,14 +76,14 @@ export default function HousingStatsPanel({ contador, variant = 'full', showHelp
               title={`Abiertas ${pctAbiertas}%`}
             />
             <div
-              className="bg-warning transition-all duration-300"
-              style={{ width: `${pctCerradas}%` }}
-              title={`Cerradas ${pctCerradas}%`}
+              className="bg-destructive transition-all duration-300"
+              style={{ width: `${pctFallidas}%` }}
+              title={`Fallidas ${pctFallidas}%`}
             />
           </div>
           <div className="flex justify-between text-[10px] text-muted-foreground font-medium">
             <span>■ Abiertas {abiertas}</span>
-            <span>■ Cerradas {cerradas}</span>
+            <span>■ Fallidas {fallidas}</span>
           </div>
         </div>
       )}
@@ -106,10 +106,10 @@ export default function HousingStatsPanel({ contador, variant = 'full', showHelp
               </span>
               <div className="flex-1 min-w-0">
                 <div className="flex items-baseline justify-between gap-2">
-                  <p className="text-sm font-bold text-foreground">{tipo.titulo}</p>
-                  <p className="text-lg font-black tabular-nums">{n}</p>
+                  <p className="text-sm font-bold text-foreground leading-tight">{tipo.titulo}</p>
+                  <p className="text-lg font-black tabular-nums shrink-0">{n}</p>
                 </div>
-                <p className="text-[10px] text-muted-foreground">{tipo.subtitulo}</p>
+                <p className="text-[11px] font-semibold text-muted-foreground">{tipo.subtitulo}</p>
                 {variant === 'full' && n > 0 && (
                   <p className="text-[10px] text-muted-foreground/80 mt-0.5">{pct}% del total</p>
                 )}
@@ -134,13 +134,15 @@ export default function HousingStatsPanel({ contador, variant = 'full', showHelp
         <div className="text-xs space-y-2 p-3 rounded-lg bg-muted/50 border">
           {TIPOS_VIVIENDA.map((t) => (
             <p key={t.code}>
-              <strong className="text-foreground">{t.code} — {t.titulo}:</strong>{' '}
+              <strong className="text-foreground">
+                {t.code} — {t.titulo} ({t.subtitulo}):
+              </strong>{' '}
               <span className="text-muted-foreground">{t.descripcion}</span>
             </p>
           ))}
           <p className="pt-2 border-t text-muted-foreground">
-            <strong className="text-foreground">Abiertas</strong> = suma E + F + R.{' '}
-            <strong className="text-foreground">Cerradas</strong> = solo N. Así se reporta al cierre del MRV.
+            <strong className="text-foreground">Abiertas</strong> = E + R (hubo contacto o rechazo con adulto).{' '}
+            <strong className="text-foreground">Fallidas</strong> = F + N (casa cerrada, sin adulto o no efectiva).
           </p>
         </div>
       )}

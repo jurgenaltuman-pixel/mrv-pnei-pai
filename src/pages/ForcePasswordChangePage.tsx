@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { KeyRound, ShieldAlert, Loader2, Eye, EyeOff } from 'lucide-react';
+import { PASSWORD_HINT, validateStrongPassword } from '@/lib/password-policy';
 
 export default function ForcePasswordChangePage() {
   const { user, changePassword, logout } = useAuth();
@@ -14,8 +15,9 @@ export default function ForcePasswordChangePage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (password.length < 6) {
-      setError('La contraseña debe tener al menos 6 caracteres.');
+    const pwErr = validateStrongPassword(password);
+    if (pwErr) {
+      setError(pwErr);
       return;
     }
     if (password !== confirm) {
@@ -50,7 +52,7 @@ export default function ForcePasswordChangePage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full h-11 px-3 pr-10 rounded-lg border bg-background text-sm"
-                placeholder="Mínimo 6 caracteres"
+                placeholder="Contraseña segura"
                 autoComplete="new-password"
               />
               <button
@@ -66,6 +68,7 @@ export default function ForcePasswordChangePage() {
                 )}
               </button>
             </div>
+            <p className="text-[10px] text-muted-foreground mt-1">{PASSWORD_HINT}</p>
           </div>
           <div>
             <label className="field-label">Confirmar contraseña</label>

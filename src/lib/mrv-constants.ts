@@ -11,8 +11,6 @@ export type FuenteVerificacion = (typeof FUENTES_VERIFICACION)[number]['id'];
 export const ACCIONES_TOMADAS = [
   { id: 'vacunado_visita', label: 'Vacunado durante la visita', hint: 'Monitor o brigada con termo de vacunación' },
   { id: 'derivado_salud', label: 'Derivado al servicio de salud', hint: 'Notificación o papel para acudir al puesto' },
-  { id: 'rechazo_definitivo', label: 'Rechazo definitivo', hint: 'Negativa del cuidador a la vacunación' },
-  { id: 'no_vacunado_cierre', label: 'No vacunado por cierre', hint: 'Periodo CVS finalizado (09 mar – 29 may)' },
 ] as const;
 
 export type AccionTomada = (typeof ACCIONES_TOMADAS)[number]['id'];

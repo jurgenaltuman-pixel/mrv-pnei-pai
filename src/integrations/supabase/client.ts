@@ -2,8 +2,8 @@ import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 import { Capacitor } from '@capacitor/core';
 import { Preferences } from '@capacitor/preferences';
+import { USE_MRV_API, USE_SUPABASE_ORG, USE_SUPABASE_PADRON } from '@/lib/api-config';
 
-// Usar variables inyectadas por Vite via define
 declare const __SUPABASE_URL__: string;
 declare const __SUPABASE_KEY__: string;
 
@@ -11,7 +11,6 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || __SUPABASE_URL__;
 const SUPABASE_PUBLISHABLE_KEY =
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || __SUPABASE_KEY__;
 
-/** Clave secreta (sb_secret_… o JWT service_role) embebida en el cliente: Supabase la rechaza y es riesgo de seguridad. */
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
   const parts = token.split('.');
   if (parts.length < 2) return null;
@@ -33,12 +32,10 @@ export function isEmbeddedSupabaseSecretKey(key: string | undefined): boolean {
   return decodeJwtPayload(k)?.role === 'service_role';
 }
 
-/** En WebView Android/iOS, localStorage a veces se pierde o queda inconsistente; Preferences persiste bien. */
 function createAuthStorage() {
   if (typeof window === 'undefined' || !Capacitor.isNativePlatform()) {
     return localStorage;
   }
-
   return {
     getItem: async (key: string) => {
       const { value } = await Preferences.get({ key });
@@ -73,30 +70,39 @@ function createAuthStorage() {
   };
 }
 
-if (import.meta.env.DEV) {
+const hasSupabaseCredentials = Boolean(
+  SUPABASE_URL?.startsWith('http') && SUPABASE_PUBLISHABLE_KEY?.length >= 20
+);
+
+/** Auth vía Supabase (modo legacy) */
+export const canUseSupabaseAuth = !USE_MRV_API && hasSupabaseCredentials;
+
+/** Padrón y/o org desde Supabase (modo híbrido con API Aiven) */
+export const canUseSupabaseCatalog = (USE_SUPABASE_ORG || USE_SUPABASE_PADRON) && hasSupabaseCredentials;
+
+const canUseSupabase = canUseSupabaseAuth || canUseSupabaseCatalog;
+
+export const supabase = canUseSupabase
+  ? createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+      auth: {
+        storage: createAuthStorage() as any,
+        persistSession: true,
+        autoRefreshToken: true,
+      },
+    })
+  : (null as unknown as ReturnType<typeof createClient<Database>>);
+
+export const isSupabaseEnabled = canUseSupabase;
+
+if (import.meta.env.DEV && canUseSupabase) {
   console.log('Supabase URL (prefix):', SUPABASE_URL?.slice(0, 48));
 }
-
-if (!SUPABASE_URL?.startsWith('http')) {
-  console.error('MRV: VITE_SUPABASE_URL no está configurada correctamente en el build.');
+if (USE_MRV_API && import.meta.env.DEV) {
+  console.log('MRV: modo API Aiven activo (VITE_MRV_API_URL)');
 }
-
-if (!SUPABASE_PUBLISHABLE_KEY || SUPABASE_PUBLISHABLE_KEY.length < 20) {
-  console.error('MRV: falta la clave publicable de Supabase (VITE_SUPABASE_PUBLISHABLE_KEY / anon).');
+if (USE_MRV_API && canUseSupabaseCatalog && import.meta.env.DEV) {
+  const parts = [];
+  if (USE_SUPABASE_PADRON) parts.push('padrón');
+  if (USE_SUPABASE_ORG) parts.push('org');
+  console.log(`MRV: ${parts.join(' + ')} desde Supabase`);
 }
-
-if (isEmbeddedSupabaseSecretKey(SUPABASE_PUBLISHABLE_KEY)) {
-  console.error(
-    '[MRV] La clave de Supabase en este build es SECRETA (no permitida en navegador/app). ' +
-      'Usá solo la clave «anon» (JWT role anon) o «publishable» (sb_publishable_…) de Project Settings → API. ' +
-      'Revisá VITE_SUPABASE_PUBLISHABLE_KEY / .env.production y recompilá el APK o el sitio web.'
-  );
-}
-
-export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
-  auth: {
-    storage: createAuthStorage() as any,
-    persistSession: true,
-    autoRefreshToken: true,
-  },
-});

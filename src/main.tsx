@@ -13,7 +13,7 @@ document.documentElement.lang = "es";
 document.documentElement.translate = false;
 
 /** Bump al desplegar si hay que forzar otro barrido (chunks viejos, SW roto). */
-const SW_SWEEP_KEY = "mrv-sw-sweep-2026-05-15-persist-or-skip-reload";
+const SW_SWEEP_KEY = "mrv-sw-sweep-2026-05-27-chunk-mapview";
 
 function sweepMarkerIsSet(): boolean {
   try {
@@ -86,6 +86,13 @@ function setBootProgressUI(pct: number, label?: string): void {
 
 async function boot(): Promise<void> {
   if (await sweepStaleCachesOnce()) return;
+
+  try {
+    const { initTheme } = await import("./contexts/ThemeContext.tsx");
+    initTheme();
+  } catch {
+    /* ignore */
+  }
 
   setBootProgressUI(6, "Descargando módulos…");
   const total = 5;

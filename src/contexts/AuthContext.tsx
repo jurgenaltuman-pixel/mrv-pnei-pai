@@ -1,6 +1,18 @@
 import React, { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase, isSupabaseEnabled } from '@/integrations/supabase/client';
 import type { User } from '@supabase/supabase-js';
+import {
+  USE_MRV_API,
+  clearUserSnapshot,
+  getApiToken,
+  getUserSnapshot,
+  isSessionExpired,
+  mrvApiFetch,
+  parseJwtPayload,
+  saveUserSnapshot,
+  setApiToken,
+} from '@/lib/api-config';
+import { validateStrongPassword } from '@/lib/password-policy';
 
 interface AuthUser {
   id: string;
@@ -20,7 +32,13 @@ interface AuthContextType {
   signOutNotice: string | null;
   dismissSignOutNotice: () => void;
   login: (identifier: string, password: string) => Promise<{ ok: boolean; error?: string }>;
-  signup: (email: string, password: string, displayName: string, username: string) => Promise<{ ok: boolean; error?: string }>;
+  signup: (
+    email: string,
+    password: string,
+    displayName: string,
+    username: string,
+    scope?: { assigned_region?: string; assigned_distrito?: string; assigned_servicio?: string }
+  ) => Promise<{ ok: boolean; error?: string }>;
   changePassword: (newPassword: string) => Promise<{ ok: boolean; error?: string }>;
   logout: () => void;
 }
@@ -189,6 +207,37 @@ async function ensureProfileRowForAuthUser(supaUser: User): Promise<void> {
   }
 
   await insertDefaultUserRole(supaUser.id);
+  await assignScopeFromPadron(supaUser.id, username);
+}
+
+async function assignScopeFromPadron(userId: string, username: string) {
+  if (!isSupabaseEnabled) return;
+  const doc = username.replace(/\D/g, '');
+  if (doc.length < 4) return;
+  try {
+    const { data: row, error } = await supabase
+      .from('base_personas')
+      .select('region_sanitaria, distrito, servicio_salud')
+      .eq('documento', doc)
+      .maybeSingle();
+    if (error || !row) return;
+    const region = row.region_sanitaria?.trim();
+    const distrito = row.distrito?.trim();
+    const servicio = row.servicio_salud?.trim();
+    if (!region || !distrito) return;
+    await supabase
+      .from('profiles')
+      .update({
+        assigned_region: region,
+        assigned_distrito: distrito,
+        assigned_servicio: servicio || null,
+        scope_locked: true,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', userId);
+  } catch (e) {
+    console.warn('assignScopeFromPadron:', e);
+  }
 }
 
 async function insertDefaultUserRole(userId: string) {
@@ -234,6 +283,106 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [signOutNotice, setSignOutNotice] = useState<string | null>(null);
 
   useEffect(() => {
+    if (USE_MRV_API) {
+      let isActive = true;
+      const loadingTimeout = window.setTimeout(() => {
+        if (isActive) setLoading(false);
+      }, 10000);
+
+      const applyApiUser = async () => {
+        const token = getApiToken();
+        if (!token) {
+          if (!isActive) return;
+          setUser(null);
+          setLoading(false);
+          return;
+        }
+        if (isSessionExpired()) {
+          setApiToken(null);
+          clearUserSnapshot();
+          setSignOutNotice('Tu sesión venció por seguridad (7 días). Volvé a ingresar.');
+          setUser(null);
+          setLoading(false);
+          return;
+        }
+        const { data, error, status } = await mrvApiFetch<{
+          user: {
+            id: string;
+            email: string;
+            nombre: string;
+            username: string | null;
+            is_active: boolean;
+            is_approved: boolean;
+            must_change_password: boolean;
+            roles: string[];
+          };
+        }>('/api/auth/me');
+        if (!isActive) return;
+
+        if (status === 401 || status === 403) {
+          setApiToken(null);
+          clearUserSnapshot();
+          setUser(null);
+          setLoading(false);
+          return;
+        }
+
+        if (data?.user) {
+          const u = data.user;
+          const privileged = u.roles?.includes('super_admin') || u.roles?.includes('admin');
+          const authUser = { id: u.id, email: u.email, nombre: u.nombre, username: u.username };
+          saveUserSnapshot(authUser);
+          setUser(authUser);
+          setApprovalPending(!privileged && !u.is_approved);
+          setInactive(!u.is_active);
+          setMustChangePassword(u.must_change_password);
+          setAuthBlockMessage(
+            !u.is_active ? 'Cuenta inactiva' : !u.is_approved && !privileged ? 'Cuenta pendiente de aprobación' : null
+          );
+          setLoading(false);
+          return;
+        }
+
+        const cached = getUserSnapshot();
+        const jwt = parseJwtPayload(token);
+        const fallback =
+          cached ||
+          (jwt?.sub && jwt?.email
+            ? { id: jwt.sub, email: jwt.email, nombre: jwt.email, username: null }
+            : null);
+
+        if (fallback) {
+          setUser(fallback);
+          setApprovalPending(false);
+          setInactive(false);
+          setMustChangePassword(false);
+          setAuthBlockMessage(
+            error ? 'Sin conexión con el servidor; sesión restaurada en el dispositivo.' : null
+          );
+          setLoading(false);
+          return;
+        }
+
+        if (status === 404) {
+          setApiToken(null);
+          clearUserSnapshot();
+        }
+        setUser(null);
+        setLoading(false);
+      };
+
+      void applyApiUser();
+      return () => {
+        isActive = false;
+        window.clearTimeout(loadingTimeout);
+      };
+    }
+
+    if (!isSupabaseEnabled) {
+      setLoading(false);
+      return;
+    }
+
     let isActive = true;
     let profileChannel: ReturnType<typeof supabase.channel> | null = null;
     let channelUserId: string | null = null;
@@ -378,9 +527,57 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  useEffect(() => {
+    if (!USE_MRV_API || !user) return;
+    const checkExpiry = () => {
+      if (isSessionExpired()) {
+        setSignOutNotice('Tu sesión venció por seguridad (7 días). Volvé a ingresar.');
+        setApiToken(null);
+        clearUserSnapshot();
+        setUser(null);
+        setApprovalPending(false);
+        setInactive(false);
+        setMustChangePassword(false);
+        setAuthBlockMessage(null);
+      }
+    };
+    checkExpiry();
+    const id = window.setInterval(checkExpiry, 60_000);
+    return () => window.clearInterval(id);
+  }, [user]);
+
   const login = async (identifier: string, password: string) => {
     setAuthBlockMessage(null);
     setSignOutNotice(null);
+
+    if (USE_MRV_API) {
+      const raw = identifier.trim();
+      if (!raw || !password) {
+        return { ok: false, error: 'Ingresá usuario/correo y contraseña.' };
+      }
+      let email = raw.includes('@') ? raw.trim().toLowerCase() : '';
+      if (!email) {
+        const { data } = await mrvApiFetch<{ email: string | null }>(
+          `/api/auth/resolve-email?username=${encodeURIComponent(raw.trim().toLowerCase())}`
+        );
+        email = data?.email || '';
+      }
+      if (!email.includes('@')) {
+        return { ok: false, error: 'No encontramos correo para ese usuario. Probá con el email completo.' };
+      }
+      const { data, error } = await mrvApiFetch<{ token: string; user: AuthUser }>('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      });
+      if (error || !data?.token) {
+        return { ok: false, error: error || 'Credenciales inválidas' };
+      }
+      setApiToken(data.token);
+      saveUserSnapshot(data.user);
+      setUser(data.user);
+      setLoading(false);
+      return { ok: true };
+    }
 
     const raw = identifier.trim();
     if (!raw) {
@@ -475,7 +672,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return emailRegex.test(email);
   };
 
-  const signup = async (email: string, password: string, displayName: string, username: string) => {
+  const signup = async (
+    email: string,
+    password: string,
+    displayName: string,
+    username: string,
+    scope?: { assigned_region?: string; assigned_distrito?: string; assigned_servicio?: string }
+  ) => {
+    if (USE_MRV_API) {
+      const normalizedEmail = email.trim().toLowerCase();
+      const normalizedUsername = username.trim().toLowerCase();
+      if (!normalizedUsername) return { ok: false, error: 'Debe ingresar un nombre de usuario.' };
+      if (!isValidEmail(normalizedEmail)) return { ok: false, error: 'Correo inválido.' };
+      const pwErr = validateStrongPassword(password);
+      if (pwErr) return { ok: false, error: pwErr };
+      const { data, error } = await mrvApiFetch<{ token: string; user: AuthUser }>('/api/auth/signup', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: normalizedEmail,
+          password,
+          displayName: displayName.trim(),
+          username: normalizedUsername,
+          assigned_region: scope?.assigned_region?.trim() || null,
+          assigned_distrito: scope?.assigned_distrito?.trim() || null,
+          assigned_servicio: scope?.assigned_servicio?.trim() || null,
+        }),
+      });
+      if (error) return { ok: false, error };
+      if (data?.token) {
+        setApiToken(data.token);
+        if (data.user) saveUserSnapshot(data.user);
+      }
+      return { ok: true };
+    }
+
     const normalizedEmail = email.trim().toLowerCase();
     const normalizedUsername = username.trim().toLowerCase();
     
@@ -484,7 +714,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!normalizedEmail) return { ok: false, error: 'Debe ingresar un correo electrónico.' };
     if (!isValidEmail(normalizedEmail)) return { ok: false, error: 'El correo electrónico no es válido. Use formato: usuario@dominio.com' };
     if (!password) return { ok: false, error: 'Debe ingresar una contraseña.' };
-    if (password.length < 6) return { ok: false, error: 'La contraseña debe tener al menos 6 caracteres.' };
+    const pwErr = validateStrongPassword(password);
+    if (pwErr) return { ok: false, error: pwErr };
     if (!displayName.trim()) return { ok: false, error: 'Debe ingresar su nombre completo.' };
 
     console.log(`📝 Intentando signup con: ${normalizedEmail}`);
@@ -515,8 +746,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const changePassword = async (newPassword: string) => {
-    if (!newPassword || newPassword.length < 6) {
-      return { ok: false, error: 'La nueva contraseña debe tener al menos 6 caracteres.' };
+    const pwErr = validateStrongPassword(newPassword);
+    if (pwErr) return { ok: false, error: pwErr };
+
+    if (USE_MRV_API) {
+      const { error } = await mrvApiFetch('/api/auth/change-password', {
+        method: 'POST',
+        body: JSON.stringify({ password: newPassword }),
+      });
+      if (error) return { ok: false, error };
+      setMustChangePassword(false);
+      return { ok: true };
     }
 
     const { data: authData, error } = await supabase.auth.updateUser({ password: newPassword });
@@ -542,7 +782,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
-    await supabase.auth.signOut();
+    if (USE_MRV_API) {
+      setApiToken(null);
+      clearUserSnapshot();
+    } else if (isSupabaseEnabled) {
+      await supabase.auth.signOut();
+    }
     setSignOutNotice(null);
     setUser(null);
     setApprovalPending(false);

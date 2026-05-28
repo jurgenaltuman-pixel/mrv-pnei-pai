@@ -1,5 +1,6 @@
 import { lazy, Suspense, useMemo, useState } from 'react';
 import { useRegistrosQuery } from '@/hooks/useRegistrosQuery';
+import { useAuth } from '@/contexts/AuthContext';
 import { useGeolocation } from '@/hooks/useGeolocation';
 import { MapSkeleton } from '@/components/mrv/PageSkeleton';
 import { MapPin, Navigation, RefreshCw, Filter } from 'lucide-react';
@@ -7,8 +8,9 @@ import { MapPin, Navigation, RefreshCw, Filter } from 'lucide-react';
 const MrvMapPanel = lazy(() => import('@/components/mrv/MrvMapPanel'));
 
 export default function MapView() {
+  const { user } = useAuth();
   const geo = useGeolocation();
-  const { data: registros = [], isLoading, isFetching, refetch } = useRegistrosQuery(2500, true);
+  const { data: registros = [], isLoading, isFetching, refetch } = useRegistrosQuery(2500, Boolean(user?.id));
   const [filtro, setFiltro] = useState<'todos' | 'vacunado' | 'no_vacunado'>('todos');
 
   const filtrados = useMemo(() => {

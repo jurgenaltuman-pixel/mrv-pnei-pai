@@ -3,6 +3,7 @@
  */
 export const TIPOS_DOCUMENTO_MRV = [
   { value: 'CI', label: 'CI', descripcion: 'Cédula de identidad' },
+  { value: 'RN', label: 'RN', descripcion: 'Registro de nacimiento / código nominal' },
   { value: 'DEX', label: 'DEX', descripcion: 'Documento de identidad extranjero' },
   { value: 'OTR', label: 'OTR', descripcion: 'Otro documento' },
 ] as const;

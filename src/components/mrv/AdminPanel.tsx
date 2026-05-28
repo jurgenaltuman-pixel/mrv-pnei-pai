@@ -1,13 +1,36 @@
 import { useState, useRef, useMemo, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
 import type { Database } from '@/integrations/supabase/types';
+import * as adminApi from '@/services/adminApi';
+import * as mrvBackend from '@/services/mrvBackend';
+import { upperText } from '@/lib/text-uppercase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { useOrgStructure } from '@/hooks/useOrgStructure';
-import { dataService } from '@/services/dataService';
-import { Upload, FileSpreadsheet, Trash2, Loader2, CheckCircle, AlertTriangle, Users, Search, Download, X } from 'lucide-react';
+import { dataService, type RegistroMRV } from '@/services/dataService';
+import { downloadRegistrosExcel, mapApiRowToRegistroMRV } from '@/lib/export-registros-excel';
+import {
+  Upload,
+  FileSpreadsheet,
+  Trash2,
+  Loader2,
+  CheckCircle,
+  AlertTriangle,
+  Users,
+  Search,
+  Download,
+  X,
+  LayoutGrid,
+} from 'lucide-react';
+import { mapExcelRowsToRegistros } from '@/lib/import-registros-excel';
 import * as XLSX from 'xlsx';
 import { mapPersonaImportRow } from '@/lib/import-excel-mrv';
+import { clampCasasPorModulo, getRoundConfig, MAX_CASAS_POR_MODULO, setRoundConfig } from '@/lib/round-config';
+import { formatFechaHoraPy } from '@/lib/format-fecha';
+import { hasProfileScopeAssignment } from '@/lib/registro-scope';
+import { useProfileScope } from '@/hooks/useProfileScope';
+import RegistroEditDialog, { type RegistroEditFields } from '@/components/mrv/RegistroEditDialog';
+import RoundHistoryAccordion from '@/components/mrv/RoundHistoryAccordion';
+import { fetchAdminRoundHistory } from '@/services/roundHistoryApi';
 
 type PersonaRow = Database['public']['Tables']['base_personas']['Row'];
 
@@ -40,6 +63,7 @@ interface NominalRow {
   sexo: string;
   estado_vacunacion: string;
   motivo: string | null;
+  observaciones?: string | null;
   tipo_vivienda?: string | null;
   esquema_completo?: boolean | null;
 }
@@ -54,8 +78,11 @@ interface OrgRow {
 interface ImportedUser {
   ci: string;
   nombres_completos: string;
-  fecha_nacimiento: string;
   nombre_usuario: string;
+  assigned_region: string;
+  assigned_distrito: string;
+  assigned_servicio: string;
+  fecha_nacimiento?: string;
 }
 
 interface ProfileRow {
@@ -131,10 +158,14 @@ function edadAniosMesesDesdeFn(fechaIso: string | null | undefined): { anos: num
 export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { isSuperAdmin?: boolean; isAdmin?: boolean }) {
   const { toast } = useToast();
   const { user: currentUser } = useAuth();
+  const { data: myScope } = useProfileScope();
   const { regiones, getDistritosByRegion, getServiciosByDistrito, getBarriosByDistrito } = useOrgStructure();
+  const [nominalNationalView, setNominalNationalView] = useState(true);
   const fileRef = useRef<HTMLInputElement>(null);
   const orgFileRef = useRef<HTMLInputElement>(null);
   const userFileRef = useRef<HTMLInputElement>(null);
+  const registrosFileRef = useRef<HTMLInputElement>(null);
+  const [importingRegistros, setImportingRegistros] = useState(false);
   const ciSearchDebounceRef = useRef<ReturnType<typeof setTimeout>>();
   const [rows, setRows] = useState<ParsedRow[]>([]);
   const [orgRows, setOrgRows] = useState<OrgRow[]>([]);
@@ -144,7 +175,17 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
   const [orgStatus, setOrgStatus] = useState<'idle' | 'parsed' | 'uploading' | 'done' | 'error'>('idle');
   const [stats, setStats] = useState({ total: 0, inserted: 0, errors: 0 });
   const [nominal, setNominal] = useState<NominalRow[]>([]);
+  const [nominalTotal, setNominalTotal] = useState<number | null>(null);
+  const [nominalSources, setNominalSources] = useState<{ aiven?: number; supabase?: number; merged?: number } | null>(
+    null
+  );
+  const [nominalLoadError, setNominalLoadError] = useState<string | null>(null);
   const [loadingNominal, setLoadingNominal] = useState(false);
+  const [exportingNominal, setExportingNominal] = useState(false);
+  const [editingNominalId, setEditingNominalId] = useState<string | null>(null);
+  const [registroEdit, setRegistroEdit] = useState<RegistroEditFields | null>(null);
+  const [roundHistory, setRoundHistory] = useState<Awaited<ReturnType<typeof fetchAdminRoundHistory>>>([]);
+  const [loadingRoundHistory, setLoadingRoundHistory] = useState(false);
   const [qNominal, setQNominal] = useState('');
   const [profiles, setProfiles] = useState<ProfileRow[]>([]);
   const [roles, setRoles] = useState<UserRoleRow[]>([]);
@@ -169,69 +210,32 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
   const [searchingCi, setSearchingCi] = useState(false);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
   const [importedUsers, setImportedUsers] = useState<ImportedUser[]>([]);
+  const [replaceUsersOnImport, setReplaceUsersOnImport] = useState(true);
+  const [manualUser, setManualUser] = useState({
+    ci: '',
+    nombre: '',
+    username: '',
+    region: '',
+    distrito: '',
+    servicio: '',
+  });
+  const [creatingManualUser, setCreatingManualUser] = useState(false);
   const [uploadingUsers, setUploadingUsers] = useState(false);
   const [statusImportUsers, setStatusImportUsers] = useState<'idle' | 'parsed' | 'uploading' | 'done' | 'error'>('idle');
 
   const loadUsersAndRoles = async () => {
     setLoadingUsers(true);
     try {
-      const selectCols =
-        'user_id, display_name, email, username, is_active, is_approved, approved_at, assigned_region, assigned_distrito, assigned_servicio, assigned_barrio, scope_locked';
-      const pageSize = 1000;
-      let from = 0;
-      let profilesData: ProfileRow[] = [];
-      let queryError: { message: string } | null = null;
-
-      while (true) {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select(selectCols)
-          .order('created_at', { ascending: false })
-          .range(from, from + pageSize - 1);
-
-        if (error) {
-          queryError = error;
-          break;
-        }
-        if (!data?.length) break;
-        profilesData = profilesData.concat(data as ProfileRow[]);
-        if (data.length < pageSize) break;
-        from += pageSize;
-        if (from > 100_000) break;
-      }
-
-      if (queryError && profilesData.length === 0) {
-        const fallback = await supabase
-          .from('profiles')
-          .select('user_id, display_name, email, username, is_active, is_approved, approved_at')
-          .order('created_at', { ascending: false })
-          .range(0, pageSize - 1);
-        if (!fallback.error && fallback.data?.length) {
-          profilesData = fallback.data as ProfileRow[];
-        }
-      }
-
-      let rolesAcc: UserRoleRow[] = [];
-      from = 0;
-      while (true) {
-        const { data, error } = await supabase
-          .from('user_roles')
-          .select('user_id, role')
-          .range(from, from + pageSize - 1);
-        if (error || !data?.length) break;
-        rolesAcc = rolesAcc.concat(data as UserRoleRow[]);
-        if (data.length < pageSize) break;
-        from += pageSize;
-        if (from > 100_000) break;
-      }
-
+      const { profiles: profilesData, roles: rolesAcc, error } = await adminApi.loadProfilesRoles();
       setLoadingUsers(false);
-
+      if (error) {
+        toast({ title: 'Error cargando usuarios', description: error, variant: 'destructive' });
+        return;
+      }
       if (!profilesData.length) {
         setProfiles([]);
       } else {
-        setProfiles(profilesData);
-
+        setProfiles(profilesData as ProfileRow[]);
         const draft: Record<string, {
           assigned_region: string;
           assigned_distrito: string;
@@ -250,8 +254,7 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
         });
         setScopeDraft(draft);
       }
-
-      setRoles(rolesAcc);
+      setRoles(rolesAcc as UserRoleRow[]);
     } catch (err) {
       console.error('Error cargando usuarios y roles:', err);
       setLoadingUsers(false);
@@ -293,16 +296,10 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
       return;
     }
     setSavingRoleFor(userId);
-    const { error: delErr } = await supabase.from('user_roles').delete().eq('user_id', userId);
-    if (delErr) {
-      setSavingRoleFor(null);
-      toast({ title: 'No se pudo actualizar el rol', variant: 'destructive' });
-      return;
-    }
-    const { error: insErr } = await supabase.from('user_roles').insert({ user_id: userId, role });
+    const errMsg = await adminApi.setPrimaryRole(userId, role);
     setSavingRoleFor(null);
-    if (insErr) {
-      toast({ title: 'No se pudo asignar el rol', variant: 'destructive' });
+    if (errMsg) {
+      toast({ title: 'No se pudo asignar el rol', description: errMsg, variant: 'destructive' });
       return;
     }
     toast({ title: 'Rol actualizado' });
@@ -312,13 +309,10 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
   const setUserApproval = async (userId: string, approved: boolean) => {
     if (!isAdmin && !isSuperAdmin) return;
     setSavingScopeFor(userId);
-    const { error } = await supabase
-      .from('profiles')
-      .update({ is_approved: approved })
-      .eq('user_id', userId);
+    const errMsg = await adminApi.patchProfile(userId, { is_approved: approved });
     setSavingScopeFor(null);
-    if (error) {
-      toast({ title: 'No se pudo actualizar aprobación', description: error.message, variant: 'destructive' });
+    if (errMsg) {
+      toast({ title: 'No se pudo actualizar aprobación', description: errMsg, variant: 'destructive' });
       return;
     }
     toast({ title: approved ? 'Usuario aprobado' : 'Aprobación revocada' });
@@ -328,13 +322,10 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
   const setUserActive = async (userId: string, active: boolean) => {
     if (!isAdmin && !isSuperAdmin) return;
     setSavingScopeFor(userId);
-    const { error } = await supabase
-      .from('profiles')
-      .update({ is_active: active })
-      .eq('user_id', userId);
+    const errMsg = await adminApi.patchProfile(userId, { is_active: active });
     setSavingScopeFor(null);
-    if (error) {
-      toast({ title: 'No se pudo actualizar estado', description: error.message, variant: 'destructive' });
+    if (errMsg) {
+      toast({ title: 'No se pudo actualizar estado', description: errMsg, variant: 'destructive' });
       return;
     }
     toast({ title: active ? 'Usuario activado' : 'Usuario inactivado' });
@@ -344,21 +335,17 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
   const resetPasswordByDefault = async (targetUserId: string) => {
     if (!isAdmin && !isSuperAdmin) return;
     setResettingPasswordFor(targetUserId);
-    const { data, error } = await supabase.rpc('admin_reset_password', {
-      target_user_id: targetUserId,
-      temp_password: 'Cambio2026!',
-    });
+    const { password, error } = await adminApi.resetPassword(targetUserId);
     if (error) {
       setResettingPasswordFor(null);
       toast({
         title: 'No se pudo resetear contraseña',
-        description: error.message,
+        description: error,
         variant: 'destructive',
       });
       return;
     }
     setResettingPasswordFor(null);
-    const password = (typeof data === 'string' && data) ? data : 'Cambio2026!';
     toast({
       title: 'Contraseña reseteada',
       description: `Clave temporal: ${password}. Se exigirá cambio al ingresar.`,
@@ -368,13 +355,13 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
   const syncProfilesIdentity = async () => {
     if (!isAdmin && !isSuperAdmin) return;
     setSyncingProfiles(true);
-    const { error } = await supabase.rpc('sync_profiles_identity');
+    const errMsg = await adminApi.syncProfilesIdentity();
     setSyncingProfiles(false);
-    if (error) {
-      toast({ title: 'No se pudo sincronizar perfiles', description: error.message, variant: 'destructive' });
+    if (errMsg) {
+      toast({ title: 'No se pudo sincronizar perfiles', description: errMsg, variant: 'destructive' });
       return;
     }
-    toast({ title: 'Perfiles sincronizados', description: 'Se actualizaron email/username desde auth.users.' });
+    toast({ title: 'Perfiles sincronizados', description: 'Sincronización completada.' });
     await loadUsersAndRoles();
   };
 
@@ -382,13 +369,10 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
     if (!isAdmin && !isSuperAdmin) return;
     if (!window.confirm(`¿Eliminar el registro de ${nombre}? Esta acción no se puede deshacer.`)) return;
     setDeletingNominalId(id);
-    const { error } = await supabase
-      .from('registros_vacunacion')
-      .delete()
-      .eq('id', id);
+    const errMsg = await adminApi.deleteRegistro(id);
     setDeletingNominalId(null);
-    if (error) {
-      toast({ title: 'No se pudo eliminar el registro', description: error.message, variant: 'destructive' });
+    if (errMsg) {
+      toast({ title: 'No se pudo eliminar el registro', description: errMsg, variant: 'destructive' });
       return;
     }
     toast({ title: 'Registro eliminado' });
@@ -427,45 +411,13 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
       scope_locked: draft.scope_locked,
     };
 
-    const tryUpdate = async (payload: Record<string, any>) =>
-      await supabase.from('profiles').update(payload as any).eq('user_id', userId);
-
-    let { error } = await tryUpdate(basePayload);
-
-    // Si faltan columnas en DB (migración no aplicada / cache), reintentamos sin esas llaves
-    // para permitir guardar al menos lo disponible y mostrar guía clara.
-    if (error) {
-      const msg = String(error.message || '').toLowerCase();
-      const missingCols: string[] = [];
-      for (const col of ['assigned_region', 'assigned_distrito', 'assigned_servicio', 'assigned_barrio', 'scope_locked']) {
-        if (msg.includes(col.toLowerCase())) missingCols.push(col);
-      }
-
-      if (msg.includes('could not find') || msg.includes('schema cache') || missingCols.length > 0) {
-        const payload = { ...basePayload };
-        missingCols.forEach((c) => { delete payload[c]; });
-        // Si no detectamos la columna exacta, empezamos por la más común del error reportado.
-        if (!missingCols.length && msg.includes('assigned_barrio')) delete payload.assigned_barrio;
-        ({ error } = await tryUpdate(payload));
-
-        if (!error) {
-          setSavingScopeFor(null);
-          toast({
-            title: 'Alcance guardado parcialmente',
-            description: 'Faltan columnas en Supabase. Ejecutá la migración de alcance (assigned_* / scope_locked) para habilitar todo.',
-            variant: 'default',
-          });
-          await loadUsersAndRoles();
-          return;
-        }
-      }
-    }
+    const errMsg = await adminApi.patchProfile(userId, basePayload);
 
     setSavingScopeFor(null);
-    if (error) {
+    if (errMsg) {
       toast({
         title: 'No se pudo guardar alcance del usuario',
-        description: error.message,
+        description: errMsg,
         variant: 'destructive',
       });
       return;
@@ -474,89 +426,163 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
     await loadUsersAndRoles();
   };
 
-  const loadNominal = async () => {
+  const loadNominal = async (forceNational = nominalNationalView) => {
     setLoadingNominal(true);
-    const query = supabase
-      .from('registros_vacunacion')
-      .select('id, fecha_hora, region, distrito, servicio, barrio, responsable, nombre, documento, fecha_nacimiento, sexo, estado_vacunacion, motivo, tipo_vivienda, esquema_completo')
-      .order('fecha_hora', { ascending: false })
-      .limit(10000);
-
-    let { data, error } = await query;
-    if (error) {
-      const message = String(error.message || '').toLowerCase();
-      console.warn('Nominal report query failed, retrying without tipo_vivienda/esquema_completo:', error.message);
-
-      if (message.includes('tipo_vivienda') || message.includes('esquema_completo') || message.includes('column')) {
-        const fallback = await supabase
-          .from('registros_vacunacion')
-          .select('id, fecha_hora, region, distrito, servicio, barrio, responsable, nombre, documento, fecha_nacimiento, sexo, estado_vacunacion, motivo')
-          .order('fecha_hora', { ascending: false })
-          .limit(10000);
-        data = fallback.data;
-        error = fallback.error;
-      }
-    }
-
+    setNominalLoadError(null);
+    const { data, error, total, sources, totalAiven, totalSupabase } = await adminApi.loadNominalRows({
+      national: forceNational,
+    });
     setLoadingNominal(false);
     if (error) {
       console.error('Error cargando reporte nominal:', error);
-      toast({ title: 'Error al cargar reporte nominal', description: error.message, variant: 'destructive' });
+      setNominalLoadError(error);
+      toast({ title: 'Error al cargar registros', description: error, variant: 'destructive' });
       return;
     }
-
-    setNominal(((data || []) as NominalRow[]).map((row) => ({
-      ...row,
-      tipo_vivienda: (row as any).tipo_vivienda ?? null,
-      esquema_completo: (row as any).esquema_completo ?? null,
-    })));
+    setNominalTotal(total ?? data.length);
+    setNominalSources(
+      sources ?? {
+        aiven: totalAiven,
+        supabase: totalSupabase,
+        merged: data.length,
+      }
+    );
+    setNominal(
+      (data || []).map((row) => ({
+        id: String(row.id),
+        fecha_hora: (row.fecha_hora as string) ?? null,
+        region: String(row.region || ''),
+        distrito: String(row.distrito || ''),
+        servicio: (row.servicio as string) ?? null,
+        barrio: (row.barrio as string) ?? null,
+        responsable: (row.responsable as string) ?? null,
+        nombre: String(row.nombre || ''),
+        documento: String(row.documento || ''),
+        fecha_nacimiento: String(row.fecha_nacimiento || ''),
+        sexo: String(row.sexo || ''),
+        estado_vacunacion: String(row.estado_vacunacion ?? row.estado_vacuna ?? ''),
+        motivo: (row.motivo as string) ?? null,
+        observaciones: (row.observaciones as string) ?? null,
+        tipo_vivienda: (row.tipo_vivienda as string) ?? null,
+        esquema_completo: (row.esquema_completo as boolean) ?? null,
+      }))
+    );
   };
 
-  const exportNominalExcel = () => {
-    const rowsToExport = filteredNominal.map((r) => {
-      const sp = splitNombreNomina(r.nombre || '');
-      const { anos, meses } = edadAniosMesesDesdeFn(r.fecha_nacimiento);
-      return {
-        id_personas: r.id,
-        tipo_documento: 'CI',
-        documento: r.documento || '',
-        nombre1: sp.n1,
-        nombre2: sp.n2,
-        apellido1: sp.a1,
-        apellido2: sp.a2,
-        fecha_nacimiento: r.fecha_nacimiento || '',
-        edad_anos: anos === '' ? '' : anos,
-        edad_en_meses: meses === '' ? '' : meses,
-        sexo: r.sexo || '',
-        telefono: '',
-        domicilio: '',
-        madre_documento: '',
-        madre_nombre1: '',
-        madre_nombre2: '',
-        madre_apellido1: '',
-        madre_apellido2: '',
-        region_sanitaria: r.region || '',
-        departamento: '',
-        municipio: r.distrito || '',
-        barrio: r.barrio || '',
-        servicio_salud: r.servicio || '',
-        fecha_registro_mrv: r.fecha_hora ? new Date(r.fecha_hora).toLocaleString('es-PY') : '',
-        estado_vacunacion: r.estado_vacunacion || '',
-        motivo_mrv: r.motivo || '',
-        tipo_vivienda: r.tipo_vivienda || '',
-        esquema_completo:
-          r.esquema_completo === null || r.esquema_completo === undefined
-            ? ''
-            : r.esquema_completo
-              ? 'Sí'
-              : 'No',
-        responsable_visita: r.responsable || '',
-      };
+  const openRegistroEdit = (r: NominalRow) => {
+    if (!isAdmin && !isSuperAdmin) return;
+    setRegistroEdit({
+      id: r.id,
+      nombre: r.nombre,
+      documento: r.documento,
+      region: r.region,
+      distrito: r.distrito,
+      servicio: r.servicio || '',
+      barrio: r.barrio || '',
+      estado_vacunacion: r.estado_vacunacion || 'no_vacunado',
+      motivo: r.motivo || '',
+      observaciones: r.observaciones || '',
+      responsable: r.responsable || '',
     });
-    const ws = XLSX.utils.json_to_sheet(rowsToExport);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'NominalMRV');
-    XLSX.writeFile(wb, `Nominal_MRV_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  const saveRegistroEdit = async (patch: Record<string, unknown>) => {
+    if (!registroEdit) return;
+    setEditingNominalId(registroEdit.id);
+    const errMsg = await adminApi.patchRegistro(registroEdit.id, patch);
+    setEditingNominalId(null);
+    if (errMsg) {
+      toast({ title: 'No se pudo actualizar', description: errMsg, variant: 'destructive' });
+      return;
+    }
+    toast({ title: 'Registro actualizado' });
+    setRegistroEdit(null);
+    await loadNominal();
+  };
+
+  const loadRoundHistory = async () => {
+    setLoadingRoundHistory(true);
+    try {
+      setRoundHistory(await fetchAdminRoundHistory());
+    } finally {
+      setLoadingRoundHistory(false);
+    }
+  };
+
+  const handleImportRegistrosExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      setImportingRegistros(true);
+      try {
+        const wb = XLSX.read(new Uint8Array(evt.target?.result as ArrayBuffer), { type: 'array', cellDates: false });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json(ws, { defval: '' }) as Record<string, unknown>[];
+        const mapped = mapExcelRowsToRegistros(json, currentUser?.id || '');
+        if (!mapped.length) {
+          toast({
+            title: 'Sin filas válidas',
+            description: 'El Excel debe tener región, distrito y nombre o documento.',
+            variant: 'destructive',
+          });
+          return;
+        }
+        const { inserted, skipped, error, total } = await adminApi.importRegistrosFromExcel(mapped);
+        if (error) {
+          toast({ title: 'Error al importar', description: error, variant: 'destructive' });
+          return;
+        }
+        toast({
+          title: 'Registros importados',
+          description: `${inserted} guardados${skipped ? `, ${skipped} omitidos` : ''}${total != null ? ` · total en base: ${total}` : ''}`,
+        });
+        setNominalNationalView(true);
+        await loadNominal(true);
+      } catch (err) {
+        toast({
+          title: 'No se pudo leer el Excel',
+          description: err instanceof Error ? err.message : String(err),
+          variant: 'destructive',
+        });
+      } finally {
+        setImportingRegistros(false);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const exportNominalExcel = async () => {
+    setExportingNominal(true);
+    try {
+      const { data, error, total } = await adminApi.loadNominalRows({ national: true });
+      if (error) {
+        toast({ title: 'Error al exportar', description: error, variant: 'destructive' });
+        return;
+      }
+      const registros = (data || []).map((row) =>
+        mapApiRowToRegistroMRV(row as Record<string, unknown>)
+      );
+      if (!registros.length) {
+        toast({
+          title: 'Sin registros',
+          description: 'No hay visitas en la base para exportar.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      downloadRegistrosExcel(registros, 'Nominal_MRV', {
+        total: total ?? registros.length,
+        nota: 'Exportación nacional completa desde Aiven. Coordenadas WGS84 (lat/long), coordenadas_wgs84 y enlace_google_maps para análisis y mapas.',
+      });
+      toast({
+        title: 'Excel generado',
+        description: `${registros.length} registros con GPS y campos de análisis.`,
+      });
+    } finally {
+      setExportingNominal(false);
+    }
   };
 
   const searchPersonaByCi = async (ci: string) => {
@@ -625,9 +651,8 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
     if (!window.confirm(`¿Eliminar usuario "${displayName}"? Esta acción no se puede deshacer y eliminará todos sus registros.`)) return;
     setDeletingUserId(userId);
     try {
-      await supabase.from('registros_vacunacion').delete().eq('responsable_id', userId);
-      await supabase.from('user_roles').delete().eq('user_id', userId);
-      const { error } = await supabase.from('profiles').delete().eq('user_id', userId);
+      const errMsg = await adminApi.deleteUserCompletely(userId);
+      const error = errMsg ? { message: errMsg } : null;
       setDeletingUserId(null);
       if (error) {
         toast({ title: 'Error al eliminar usuario', description: error.message, variant: 'destructive' });
@@ -664,20 +689,38 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
           const keys = Object.keys(row);
           const map = new Map(keys.map((k) => [normalizeHeader(k), k]));
 
-          const keyCI = map.get('ci') || keys[0];
-          const keyNombres = map.get('nombres_completos') || map.get('nombre') || keys[1];
-          const keyFechaNac = map.get('fecha_nacimiento') || keys[2];
-          const keyUsuario = map.get('nombre_usuario') || map.get('nombre_de_usuario') || map.get('usuario') || keys[3];
+          const keyCI = map.get('documento') || map.get('ci') || map.get('cedula') || keys[0];
+          const keyNombres =
+            map.get('nombre_completo') ||
+            map.get('nombres_completos') ||
+            map.get('nombre') ||
+            keys[1];
+          const keyUsuario =
+            map.get('nombre_de_usuario') ||
+            map.get('nombre_usuario') ||
+            map.get('usuario') ||
+            keys[2];
+          const keyRegion = map.get('region_sanitaria') || map.get('region') || keys[3];
+          const keyDistrito = map.get('distrito') || keys[4];
+          const keyServicio =
+            map.get('servicio_vacunatorio') ||
+            map.get('servicio') ||
+            map.get('servicio_salud') ||
+            keys[5];
+          const keyFechaNac = map.get('fecha_nacimiento');
 
-          const ci = String(row[keyCI] || '').trim();
+          const ci = String(row[keyCI] || '').replace(/\D/g, '').trim() || String(row[keyCI] || '').trim();
           const nombres = String(row[keyNombres] || '').trim();
-          const fecha = parseDate(row[keyFechaNac]);
+          const fecha = keyFechaNac ? parseDate(row[keyFechaNac]) : null;
 
           return {
             ci,
             nombres_completos: nombres,
-            fecha_nacimiento: fecha || '',
-            nombre_usuario: String(row[keyUsuario] || ci).trim(),
+            nombre_usuario: String(row[keyUsuario] || ci).trim().toLowerCase(),
+            assigned_region: String(row[keyRegion] || '').trim(),
+            assigned_distrito: String(row[keyDistrito] || '').trim(),
+            assigned_servicio: String(row[keyServicio] || '').trim(),
+            fecha_nacimiento: fecha || undefined,
           };
         }).filter(r => r.ci && r.nombres_completos);
 
@@ -701,35 +744,32 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
     const payload = importedUsers.map((user) => ({
       ci: String(user.ci || '').trim(),
       nombres_completos: String(user.nombres_completos || '').trim(),
+      nombre_usuario: String(user.nombre_usuario || user.ci || '').trim().toLowerCase(),
+      assigned_region: String(user.assigned_region || '').trim(),
+      assigned_distrito: String(user.assigned_distrito || '').trim(),
+      assigned_servicio: String(user.assigned_servicio || '').trim(),
       fecha_nacimiento: String(user.fecha_nacimiento || '').trim(),
-      nombre_usuario: String(user.nombre_usuario || user.ci || '').trim(),
     }));
 
     try {
-      const { data, error } = await supabase.functions.invoke('import-users', {
-        body: JSON.stringify({ users: payload }),
-        headers: { 'Content-Type': 'application/json' },
-      });
-
+      const result = await adminApi.importUsersBatch(payload, { replace: replaceUsersOnImport });
       setUploadingUsers(false);
       setImportedUsers([]);
 
-      if (error) {
-        console.error('Import function error:', error);
+      if (result.error) {
+        console.error('Import users error:', result.error);
         setStatusImportUsers('error');
         toast({
           title: 'Error en importación de usuarios',
-          description: error.message,
+          description: result.error,
           variant: 'destructive',
         });
         return;
       }
-
-      const result = (data as any) || {};
       setStatusImportUsers(result.errors === 0 && result.created > 0 ? 'done' : 'error');
       toast({
         title: result.errors === 0 ? 'Usuarios importados exitosamente' : 'Importación con errores',
-        description: `Creados: ${result.created || 0}, omitidos: ${result.skipped || 0}, errores: ${result.errors || 0}`,
+        description: `Creados: ${result.created || 0}, actualizados: ${result.updated || 0}, desactivados: ${result.deactivated || 0}, errores: ${result.errors || 0}`,
         variant: result.errors === 0 ? 'default' : 'destructive',
       });
     } catch (err) {
@@ -874,82 +914,8 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
     setUploadingOrg(true);
     setOrgStatus('uploading');
     try {
-      // Reemplazo total para limpiar mezclas previas.
-      await supabase.from('barrios').delete().gt('id', 0);
-      await supabase.from('servicios_salud').delete().gt('id', 0);
-      await supabase.from('distritos').delete().gt('id', 0);
-      await supabase.from('regiones_sanitarias').delete().gt('id', 0);
-
-      const uniqueRegions = Array.from(new Set(orgRows.map((r) => r.region.trim())))
-        .filter(Boolean)
-        .sort((a, b) => a.localeCompare(b));
-      const regionMap = new Map<string, number>();
-      for (const regionName of uniqueRegions) {
-        const { data: inserted } = await supabase
-          .from('regiones_sanitarias')
-          .insert({ nombre: regionName })
-          .select('id, nombre')
-          .single();
-        if (inserted) regionMap.set(normalizeKey(inserted.nombre), inserted.id);
-      }
-
-      const distritoMap = new Map<string, number>();
-      const uniqueDistritos = Array.from(
-        new Set(
-          orgRows.map((r) => `${normalizeKey(r.region)}||${r.distrito.trim()}`)
-        )
-      ).map((raw) => {
-        const [regionKey, distritoName] = raw.split('||');
-        return { regionKey, distritoName: distritoName.trim() };
-      }).filter((x) => x.regionKey && x.distritoName);
-
-      for (const item of uniqueDistritos) {
-        const regionId = regionMap.get(item.regionKey);
-        if (!regionId) continue;
-        const { data: inserted } = await supabase
-          .from('distritos')
-          .insert({ nombre: item.distritoName, region_id: regionId })
-          .select('id, nombre, region_id')
-          .single();
-        if (inserted) distritoMap.set(`${inserted.region_id}:${normalizeKey(inserted.nombre)}`, inserted.id);
-      }
-
-      const uniqueServicios = Array.from(
-        new Set(
-          orgRows.map((r) => `${normalizeKey(r.region)}||${normalizeKey(r.distrito)}||${r.servicio.trim()}`)
-        )
-      ).map((raw) => {
-        const [regionKey, distritoKey, servicioName] = raw.split('||');
-        return { regionKey, distritoKey, servicioName: servicioName.trim() };
-      }).filter((x) => x.regionKey && x.distritoKey && x.servicioName);
-
-      for (const item of uniqueServicios) {
-        const regionId = regionMap.get(item.regionKey);
-        if (!regionId) continue;
-        const distritoId = distritoMap.get(`${regionId}:${item.distritoKey}`);
-        if (!distritoId) continue;
-        await supabase.from('servicios_salud').insert({ nombre: item.servicioName, distrito_id: distritoId });
-      }
-
-      const uniqueBarrios = Array.from(
-        new Set(
-          orgRows
-            .filter((r) => Boolean(r.barrio))
-            .map((r) => `${normalizeKey(r.region)}||${normalizeKey(r.distrito)}||${(r.barrio || '').trim()}`)
-        )
-      ).map((raw) => {
-        const [regionKey, distritoKey, barrioName] = raw.split('||');
-        return { regionKey, distritoKey, barrioName: barrioName.trim() };
-      }).filter((x) => x.regionKey && x.distritoKey && x.barrioName);
-
-      for (const item of uniqueBarrios) {
-        const regionId = regionMap.get(item.regionKey);
-        if (!regionId) continue;
-        const distritoId = distritoMap.get(`${regionId}:${item.distritoKey}`);
-        if (!distritoId) continue;
-        await supabase.from('barrios').insert({ nombre: item.barrioName, distrito_id: distritoId });
-      }
-
+      const errMsg = await adminApi.importOrgRows(orgRows);
+      if (errMsg) throw new Error(errMsg);
       setOrgStatus('done');
       toast({ title: 'Unidades organizativas cargadas y depuradas correctamente' });
       window.location.reload();
@@ -969,10 +935,24 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
     const batchSize = 100;
     for (let i = 0; i < rows.length; i += batchSize) {
       const batch = rows.slice(i, i + batchSize);
-      const { error } = await supabase.from('base_personas').insert(
-        batch.map(r => ({ nombre: r.nombre, tipo_documento: r.tipo_documento, documento: r.documento, fecha_nacimiento: r.fecha_nacimiento, sexo: r.sexo, region_sanitaria: r.region_sanitaria, distrito: r.distrito, servicio_salud: r.servicio_salud, documento_madre: r.documento_madre, nombre_madre: r.nombre_madre }))
+      const errMsg = await adminApi.importPadronBatch(
+        batch.map((r) => ({
+          nombre: r.nombre,
+          tipo_documento: r.tipo_documento,
+          documento: r.documento,
+          fecha_nacimiento: r.fecha_nacimiento,
+          sexo: r.sexo,
+          region_sanitaria: r.region_sanitaria,
+          distrito: r.distrito,
+          servicio_salud: r.servicio_salud,
+          documento_madre: r.documento_madre,
+          nombre_madre: r.nombre_madre,
+        }))
       );
-      if (error) { console.error(error); errors += batch.length; } else inserted += batch.length;
+      if (errMsg) {
+        console.error(errMsg);
+        errors += batch.length;
+      } else inserted += batch.length;
     }
     setStats({ total: rows.length, inserted, errors });
     setStatus(errors === 0 ? 'done' : 'error');
@@ -990,14 +970,41 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
     );
   }, [nominal, qNominal]);
 
-  const [adminTab, setAdminTab] = useState<'users' | 'import' | 'nominal' | 'search'>('users');
+  const manualUserDistritos = useMemo(() => {
+    const reg = regiones.find((r) => r.nombre === manualUser.region);
+    return reg ? getDistritosByRegion(reg.id) : [];
+  }, [regiones, manualUser.region, getDistritosByRegion]);
+
+  const manualUserServicios = useMemo(() => {
+    const dis = manualUserDistritos.find((d) => d.nombre === manualUser.distrito);
+    return dis ? getServiciosByDistrito(dis.id) : [];
+  }, [manualUserDistritos, manualUser.distrito, getServiciosByDistrito]);
+
+  const [adminTab, setAdminTab] = useState<'users' | 'import' | 'nominal' | 'search' | 'monitoreo' | 'rondas'>('users');
+  const [casasPorModulo, setCasasPorModulo] = useState(() => getRoundConfig().casasPorModulo);
+
+  const nominalAutoLoadRef = useRef(false);
+  useEffect(() => {
+    if (adminTab !== 'nominal' || (!isAdmin && !isSuperAdmin)) return;
+    if (nominalAutoLoadRef.current) return;
+    nominalAutoLoadRef.current = true;
+    void loadNominal();
+  }, [adminTab, isAdmin, isSuperAdmin]);
+
+  const roundHistoryAutoLoadRef = useRef(false);
+  useEffect(() => {
+    if (adminTab !== 'rondas' || (!isAdmin && !isSuperAdmin)) return;
+    if (roundHistoryAutoLoadRef.current) return;
+    roundHistoryAutoLoadRef.current = true;
+    void loadRoundHistory();
+  }, [adminTab, isAdmin, isSuperAdmin]);
 
   const handleClear = async () => {
     if (!window.confirm('Esto eliminará todos los registros de la base de personas. ¿Continuar?')) return;
     setUploading(true);
-    const { error } = await supabase.from('base_personas').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    const errMsg = await adminApi.clearPadron();
     setUploading(false);
-    if (error) toast({ title: 'Error al limpiar', variant: 'destructive' });
+    if (errMsg) toast({ title: 'Error al limpiar', description: errMsg, variant: 'destructive' });
     else toast({ title: 'Base de personas limpiada' });
   };
 
@@ -1007,13 +1014,36 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
         <Users className="w-6 h-6 text-primary" />
         Administración · M R V (PNEI / PAI)
       </h2>
-      <p className="text-xs text-muted-foreground -mt-2">{profiles.length} usuarios · {nominal.length} registros</p>
+      <p className="text-xs text-muted-foreground -mt-2">
+        {profiles.length} usuarios ·{' '}
+        {nominal.length > 0
+          ? `${nominal.length} registros${
+              nominalSources?.supabase
+                ? ` (Aiven ${nominalSources.aiven ?? 0} + Supabase ${nominalSources.supabase})`
+                : ''
+            }`
+          : nominalSources?.supabase
+            ? `0 visibles · ${nominalSources.supabase} en Supabase (sincronizá la API)`
+            : `${nominal.length} registros`}
+      </p>
 
       <div className="flex gap-1.5 overflow-x-auto pb-1">
-        {(['users', 'import', 'nominal', 'search'] as const).map((id) => (
+        {(['users', 'import', 'nominal', 'rondas', 'search', 'monitoreo'] as const)
+          .filter((id) => id !== 'rondas' || isAdmin || isSuperAdmin)
+          .map((id) => (
           <button key={id} type="button" onClick={() => setAdminTab(id)}
             className={`shrink-0 h-9 px-4 rounded-xl text-xs font-bold ${adminTab === id ? 'bg-primary text-primary-foreground shadow' : 'bg-secondary'}`}>
-            {id === 'users' ? 'Usuarios' : id === 'import' ? 'Importar' : id === 'nominal' ? 'Registros' : 'Buscar'}
+            {id === 'users'
+              ? 'Usuarios'
+              : id === 'import'
+                ? 'Importar'
+                : id === 'nominal'
+                  ? 'Registros'
+                  : id === 'rondas'
+                    ? 'Rondas'
+                    : id === 'search'
+                      ? 'Buscar'
+                      : 'Croquis'}
           </button>
         ))}
       </div>
@@ -1313,9 +1343,104 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
         {ciSearch.trim() && ciResults.length === 0 && !searchingCi && (
           <div className="text-xs text-success p-3 bg-success/10 rounded-lg flex items-center gap-2">
             <span>✓</span>
-            <span>No hay registros - Disponible para crear nuevo usuario</span>
+            <span>No está en el padrón de niños — puede registrar brigadista manual abajo</span>
           </div>
         )}
+
+        <div className="rounded-xl border border-dashed p-3 space-y-2 bg-muted/20">
+          <p className="text-xs font-bold text-primary">Registrar brigadista (no está en la nómina Excel)</p>
+          <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-2">
+            <input
+              value={manualUser.ci}
+              onChange={(e) => setManualUser((s) => ({ ...s, ci: e.target.value.replace(/\D/g, '') }))}
+              placeholder="Documento / CI"
+              className="h-9 px-2 rounded-lg border bg-background text-xs"
+            />
+            <input
+              value={manualUser.username}
+              onChange={(e) => setManualUser((s) => ({ ...s, username: e.target.value.toLowerCase() }))}
+              placeholder="Usuario (opcional, default CI)"
+              className="h-9 px-2 rounded-lg border bg-background text-xs"
+            />
+            <input
+              value={manualUser.nombre}
+              onChange={(e) => setManualUser((s) => ({ ...s, nombre: upperText(e.target.value) }))}
+              placeholder="Nombre completo"
+              className="h-9 px-2 rounded-lg border bg-background text-xs mrv-field-text col-span-full"
+            />
+            <select
+              value={manualUser.region}
+              onChange={(e) => setManualUser((s) => ({ ...s, region: e.target.value, distrito: '', servicio: '' }))}
+              className="h-9 px-2 rounded-lg border bg-background text-xs"
+            >
+              <option value="">Región…</option>
+              {regiones.map((r) => (
+                <option key={r.id} value={r.nombre}>
+                  {r.nombre}
+                </option>
+              ))}
+            </select>
+            <select
+              value={manualUser.distrito}
+              onChange={(e) => setManualUser((s) => ({ ...s, distrito: e.target.value, servicio: '' }))}
+              className="h-9 px-2 rounded-lg border bg-background text-xs"
+              disabled={!manualUser.region}
+            >
+              <option value="">Distrito…</option>
+              {manualUserDistritos.map((d) => (
+                <option key={d.id} value={d.nombre}>
+                  {d.nombre}
+                </option>
+              ))}
+            </select>
+            <select
+              value={manualUser.servicio}
+              onChange={(e) => setManualUser((s) => ({ ...s, servicio: e.target.value }))}
+              className="h-9 px-2 rounded-lg border bg-background text-xs col-span-full"
+              disabled={!manualUser.distrito}
+            >
+              <option value="">Servicio de salud…</option>
+              {manualUserServicios.map((s) => (
+                <option key={s.id} value={s.nombre}>
+                  {s.nombre}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button
+            type="button"
+            disabled={creatingManualUser || !manualUser.ci || !manualUser.nombre}
+            onClick={async () => {
+              const un = (manualUser.username || manualUser.ci).trim().toLowerCase();
+              const email = `${un.replace(/[^a-z0-9._-]/g, '')}@mrv.import`;
+              setCreatingManualUser(true);
+              const { data, error } = await mrvBackend.createUser({
+                email,
+                username: un,
+                displayName: manualUser.nombre,
+                password: `Mrv${manualUser.ci.slice(-4).padStart(4, '0')}!`,
+                assigned_region: manualUser.region || null,
+                assigned_distrito: manualUser.distrito || null,
+                assigned_servicio: manualUser.servicio || null,
+                is_approved: true,
+              });
+              setCreatingManualUser(false);
+              if (error) {
+                toast({ title: 'No se pudo crear', description: error, variant: 'destructive' });
+                return;
+              }
+              toast({
+                title: 'Usuario creado',
+                description: `Clave temporal: ${(data as { password?: string })?.password || 'ver consola'}`,
+              });
+              setManualUser({ ci: '', nombre: '', username: '', region: '', distrito: '', servicio: '' });
+              await loadUsersAndRoles();
+            }}
+            className="w-full h-10 rounded-xl bg-primary text-primary-foreground text-xs font-bold disabled:opacity-50"
+          >
+            {creatingManualUser ? 'Creando…' : 'Crear usuario con asignación manual'}
+          </button>
+        </div>
       </div>
       )}
 
@@ -1327,9 +1452,18 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
           Importar Usuarios (.xlsx)
         </h3>
         <p className="text-xs text-muted-foreground leading-relaxed">
-          Suba un archivo Excel con columnas: CI, Nombres Completos, Fecha de Nacimiento, Nombre de Usuario.
-          Se crearán nuevos usuarios automáticamente con contraseña temporal.
+          Excel «Listado de usuarios activos»: Documento, Nombre Completo, Nombre de Usuario (opcional), Región
+          Sanitaria, Distrito, Servicio/Vacunatorio. Actualiza asignación de usuarios existentes y crea los nuevos con
+          contraseña temporal. Opción reemplazar: desactiva brigadistas que no figuren en el archivo.
         </p>
+        <label className="flex items-center gap-2 text-xs font-medium">
+          <input
+            type="checkbox"
+            checked={replaceUsersOnImport}
+            onChange={(e) => setReplaceUsersOnImport(e.target.checked)}
+          />
+          Reemplazar nómina (desactivar usuarios que no estén en el archivo)
+        </label>
         <input ref={userFileRef} type="file" accept=".xlsx,.xls" onChange={handleImportUsersFile} className="hidden" title="Seleccionar archivo de usuarios" />
         <div className="flex gap-2">
           <button onClick={() => userFileRef.current?.click()} disabled={uploadingUsers}
@@ -1438,24 +1572,129 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
       </>
       )}
 
+      {adminTab === 'monitoreo' && (isAdmin || isSuperAdmin) && (
+        <div className="section-card space-y-3">
+          <h3 className="text-sm font-bold text-primary uppercase tracking-wide flex items-center gap-2">
+            <LayoutGrid className="w-4 h-4" />
+            Monitoreo por casas (croquis)
+          </h3>
+          <p className="text-xs text-muted-foreground">
+            Cantidad de viviendas en el mapa tipo butacas. Los brigadistas registran niños por casa (sin evaluación CVS ni fechas de dosis).
+          </p>
+          <label className="field-label">Casas por módulo (default 20)</label>
+          <input
+            type="number"
+            min={4}
+            max={MAX_CASAS_POR_MODULO}
+            value={casasPorModulo}
+            onChange={(e) => setCasasPorModulo(clampCasasPorModulo(Number(e.target.value) || 20))}
+            className="w-full h-11 px-3 rounded-xl border bg-background text-base"
+          />
+          <button
+            type="button"
+            onClick={() => {
+              setRoundConfig({ casasPorModulo });
+              toast({ title: 'Configuración guardada', description: `${casasPorModulo} casas por módulo` });
+            }}
+            className="h-10 px-4 rounded-xl bg-primary text-primary-foreground text-sm font-bold"
+          >
+            Guardar configuración
+          </button>
+        </div>
+      )}
+
+      {adminTab === 'rondas' && (isAdmin || isSuperAdmin) && (
+        <div className="section-card space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-sm font-bold text-primary uppercase tracking-wide">Historial de rondas</h3>
+            <button
+              type="button"
+              onClick={() => void loadRoundHistory()}
+              disabled={loadingRoundHistory}
+              className="h-9 px-3 rounded-lg bg-secondary text-secondary-foreground text-xs font-bold disabled:opacity-50"
+            >
+              {loadingRoundHistory ? 'Cargando...' : 'Actualizar'}
+            </button>
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            Rondas cerradas en el servidor, agrupadas por encuestador y asignación (región · distrito · servicio).
+          </p>
+          {loadingRoundHistory && roundHistory.length === 0 ? (
+            <p className="text-xs text-muted-foreground flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin" /> Cargando historial…
+            </p>
+          ) : (
+            <RoundHistoryAccordion rows={roundHistory} groupByUser />
+          )}
+        </div>
+      )}
+
       {adminTab === 'nominal' && (
       <div className="section-card space-y-3">
+        {hasProfileScopeAssignment(myScope) && (
+          <div className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs space-y-2">
+            <p>
+              <span className="font-bold text-primary">Vista zonal:</span>{' '}
+              {myScope?.assigned_region} · {myScope?.assigned_distrito}
+              {myScope?.assigned_servicio ? ` · ${myScope.assigned_servicio}` : ''}
+            </p>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={nominalNationalView}
+                onChange={(e) => {
+                  setNominalNationalView(e.target.checked);
+                  void loadNominal(e.target.checked);
+                }}
+              />
+              Ver todo el país en este reporte
+            </label>
+          </div>
+        )}
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-sm font-bold text-primary uppercase tracking-wide flex items-center gap-2">
             <Users className="w-4 h-4" />
             Reporte Nominal (Personas Registradas)
           </h3>
-          <div className="flex gap-2">
-            <button onClick={loadNominal} disabled={loadingNominal}
+          <div className="flex flex-wrap gap-2 justify-end">
+            <button
+              type="button"
+              onClick={() => registrosFileRef.current?.click()}
+              disabled={importingRegistros}
+              className="h-9 px-3 rounded-lg border border-primary/40 text-primary text-xs font-bold flex items-center gap-1 disabled:opacity-50"
+            >
+              {importingRegistros ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+              Importar Excel
+            </button>
+            <button onClick={() => void loadNominal()} disabled={loadingNominal}
               className="h-9 px-3 rounded-lg bg-secondary text-secondary-foreground text-xs font-bold disabled:opacity-50">
               {loadingNominal ? 'Cargando...' : 'Actualizar'}
             </button>
-            <button onClick={exportNominalExcel} disabled={!filteredNominal.length}
-              className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-xs font-bold flex items-center gap-1 disabled:opacity-50">
-              <Download className="w-3.5 h-3.5" /> Excel
+            <button
+              type="button"
+              onClick={() => void exportNominalExcel()}
+              disabled={exportingNominal || loadingNominal}
+              className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-xs font-bold flex items-center gap-1 disabled:opacity-50"
+            >
+              {exportingNominal ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Download className="w-3.5 h-3.5" />
+              )}{' '}
+              Excel completo
             </button>
           </div>
         </div>
+        <input
+          ref={registrosFileRef}
+          type="file"
+          accept=".xlsx,.xls"
+          className="hidden"
+          onChange={handleImportRegistrosExcel}
+        />
+        <p className="text-[10px] text-muted-foreground -mt-1">
+          Usá el mismo formato que «MRV_Registros_*.xlsx» (export del panel). Tras importar se activa vista nacional para ver todos.
+        </p>
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input
@@ -1467,22 +1706,46 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
         </div>
         <div className="max-h-80 overflow-y-auto border rounded-lg">
           {filteredNominal.length === 0 ? (
-            <p className="text-xs text-muted-foreground p-3">Sin datos. Presione "Actualizar".</p>
+            <p className="text-xs text-muted-foreground p-3">
+              {nominalLoadError
+                ? `Error: ${nominalLoadError}`
+                : loadingNominal
+                  ? 'Cargando registros...'
+                  : hasProfileScopeAssignment(myScope) && !nominalNationalView
+                    ? `Sin registros en ${myScope?.assigned_distrito || 'tu zona'}. Probá «Ver todo el país», otro período en el panel, o quitá la asignación en Región/distrito/servicio.`
+                    : nominalSources?.supabase
+                      ? `Hay ${nominalSources.supabase} registros en Supabase pero 0 en Aiven. En Vercel agregá SUPABASE_SERVICE_ROLE_KEY y redesplegá, o ejecutá: node scripts/sync-registros-supabase-to-aiven.mjs`
+                      : 'Sin registros en la base. Verificá que los brigadistas hayan guardado con conexión o probá de nuevo.'}
+            </p>
           ) : (
             <div className="divide-y">
               {filteredNominal.slice(0, 300).map((r) => (
                 <div key={r.id} className="p-2.5 text-xs">
                   <p className="font-semibold text-foreground">{r.nombre} - CI: {r.documento}</p>
                   <p className="text-muted-foreground">{r.region} / {r.distrito} / {r.servicio || 'Sin servicio'}</p>
-                  <p className="text-muted-foreground">{r.estado_vacunacion} | {r.fecha_hora ? new Date(r.fecha_hora).toLocaleString('es-PY') : 'Sin fecha'}</p>
+                  <p className="text-muted-foreground">{r.estado_vacunacion} | {r.fecha_hora ? formatFechaHoraPy(r.fecha_hora) : 'Sin fecha'}</p>
+                  {r.observaciones?.includes('[Ronda ') && (
+                    <p className="text-[10px] font-mono text-primary/80 mt-0.5">
+                      {r.observaciones.match(/\[Ronda [^\]]+\]/)?.[0] ?? ''}
+                    </p>
+                  )}
                   {(isAdmin || isSuperAdmin) && (
-                    <div className="mt-1.5 flex justify-end">
+                    <div className="mt-1.5 flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openRegistroEdit(r)}
+                        disabled={editingNominalId === r.id || deletingNominalId === r.id}
+                        className="h-7 px-2 rounded bg-primary/10 text-primary text-[11px] font-semibold disabled:opacity-50"
+                        title="Editar estado y motivo"
+                      >
+                        {editingNominalId === r.id ? 'Guardando...' : 'Editar'}
+                      </button>
                       <button
                         type="button"
                         onClick={() => deleteNominal(r.id, r.nombre)}
-                        disabled={deletingNominalId === r.id}
+                        disabled={deletingNominalId === r.id || editingNominalId === r.id}
                         className="h-7 px-2 rounded bg-destructive/10 text-destructive text-[11px] font-semibold disabled:opacity-50"
-                        title="Eliminar registro nominal"
+                        title="Eliminar registro"
                       >
                         {deletingNominalId === r.id ? 'Eliminando...' : 'Eliminar'}
                       </button>
@@ -1495,6 +1758,13 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
         </div>
       </div>
       )}
+
+      <RegistroEditDialog
+        registro={registroEdit}
+        saving={editingNominalId === registroEdit?.id}
+        onClose={() => setRegistroEdit(null)}
+        onSave={(patch) => void saveRegistroEdit(patch)}
+      />
     </div>
   );
 }

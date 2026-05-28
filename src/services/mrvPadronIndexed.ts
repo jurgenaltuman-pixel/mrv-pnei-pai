@@ -3,6 +3,9 @@
  * Se llena con «Descargar metadatos» / sincronización paginada desde base_personas.
  */
 import { supabase } from '@/integrations/supabase/client';
+import { USE_MRV_API, USE_SUPABASE_PADRON } from '@/lib/api-config';
+import { extractSexoFromPadronRow } from '@/lib/persona-sexo';
+import { fetchPadronCount, fetchPadronPage } from '@/services/mrvBackend';
 
 const DB_NAME = 'mrv_padron';
 const DB_VERSION = 1;
@@ -153,10 +156,15 @@ export const mrvPadronIndexed = {
 
     let totalRows: number | null = null;
     try {
-      const { count, error: countErr } = await supabase
-        .from('base_personas')
-        .select('id', { count: 'exact', head: true });
-      if (!countErr && typeof count === 'number' && count >= 0) totalRows = count;
+      if (USE_MRV_API && !USE_SUPABASE_PADRON) {
+        const { data } = await fetchPadronCount();
+        if (typeof data?.count === 'number' && data.count >= 0) totalRows = data.count;
+      } else {
+        const { count, error: countErr } = await supabase
+          .from('base_personas')
+          .select('id', { count: 'exact', head: true });
+        if (!countErr && typeof count === 'number' && count >= 0) totalRows = count;
+      }
     } catch {
       /* sin total: la UI muestra solo filas/MB */
     }
@@ -185,15 +193,25 @@ export const mrvPadronIndexed = {
     try {
       while (true) {
         const from = page * pageSize;
-        const to = from + pageSize - 1;
-        const { data, error } = await supabase
-          .from('base_personas')
-          .select('id, nombre, tipo_documento, documento, fecha_nacimiento, sexo, region_sanitaria, distrito, servicio_salud, documento_madre, nombre_madre')
-          .order('id', { ascending: true })
-          .range(from, to);
-        if (error) {
+        let data: Record<string, unknown>[] | null = null;
+        let fetchError: string | undefined;
+        if (USE_MRV_API && !USE_SUPABASE_PADRON) {
+          const { data: apiRes, error } = await fetchPadronPage(from, pageSize);
+          fetchError = error;
+          data = (apiRes?.data || []) as Record<string, unknown>[];
+        } else {
+          const to = from + pageSize - 1;
+          const res = await supabase
+            .from('base_personas')
+            .select('id, nombre, tipo_documento, documento, fecha_nacimiento, sexo, region_sanitaria, distrito, servicio_salud, documento_madre, nombre_madre')
+            .order('id', { ascending: true })
+            .range(from, to);
+          fetchError = res.error?.message;
+          data = res.data as Record<string, unknown>[] | null;
+        }
+        if (fetchError) {
           await this.setMeta({ rowCount: imported, complete: false });
-          return { imported, error: error.message };
+          return { imported, error: fetchError };
         }
         if (!data?.length) break;
         bytesApprox += textEncoder.encode(JSON.stringify(data)).length;
@@ -203,7 +221,7 @@ export const mrvPadronIndexed = {
           tipo_documento: String(raw.tipo_documento ?? 'CI').toUpperCase(),
           documento: String(raw.documento ?? '').trim(),
           fecha_nacimiento: (raw.fecha_nacimiento as string | null) ?? null,
-          sexo: (raw.sexo as string | null) ?? null,
+          sexo: extractSexoFromPadronRow(raw) || null,
           region_sanitaria: (raw.region_sanitaria as string | null) ?? null,
           distrito: (raw.distrito as string | null) ?? null,
           servicio_salud: (raw.servicio_salud as string | null) ?? null,
@@ -345,8 +363,29 @@ export const mrvPadronIndexed = {
     });
 
     let rows = candidates;
-    if (parts.length > 0) {
+    if (parts.length > 0 && rows.length > 0) {
       rows = rows.filter((row) => nombreCoincide(row.nombre, parts));
+    } else if (parts.length > 0 && !hasServerFilter) {
+      const byName: PadronRow[] = [];
+      await new Promise<void>((resolve, reject) => {
+        const req = store.openCursor();
+        req.onerror = () => reject(req.error);
+        req.onsuccess = () => {
+          const cursor = req.result;
+          if (!cursor) {
+            resolve();
+            return;
+          }
+          const row = cursor.value as PadronRow;
+          if (nombreCoincide(row.nombre, parts)) byName.push(row);
+          if (byName.length >= limit * 3) {
+            resolve();
+            return;
+          }
+          cursor.continue();
+        };
+      });
+      rows = byName;
     } else if (!hasServerFilter) {
       return [];
     }

@@ -125,6 +125,51 @@
     --sidebar-border: 220 13% 91%;
     --sidebar-ring: 210 100% 32%;
   }
+
+  .dark {
+    --background: 215 30% 9%;
+    --foreground: 210 25% 96%;
+
+    --card: 215 28% 13%;
+    --card-foreground: 210 25% 96%;
+
+    --popover: 215 28% 13%;
+    --popover-foreground: 210 25% 96%;
+
+    --primary: 210 100% 48%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 215 22% 18%;
+    --secondary-foreground: 210 20% 90%;
+
+    --muted: 215 22% 16%;
+    --muted-foreground: 210 14% 62%;
+
+    --accent: 210 50% 20%;
+    --accent-foreground: 210 80% 85%;
+
+    --destructive: 0 65% 48%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 152 55% 42%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 85% 48%;
+    --warning-foreground: 0 0% 100%;
+
+    --border: 215 20% 22%;
+    --input: 215 20% 22%;
+    --ring: 210 100% 48%;
+
+    --sidebar-background: 215 30% 10%;
+    --sidebar-foreground: 210 20% 90%;
+    --sidebar-primary: 210 100% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 215 22% 16%;
+    --sidebar-accent-foreground: 210 20% 90%;
+    --sidebar-border: 215 20% 22%;
+    --sidebar-ring: 210 100% 48%;
+  }
 }
 
 @layer base {
@@ -163,17 +208,159 @@
   .section-card {
     @apply bg-card rounded-2xl shadow-sm border p-3 sm:p-4 mb-3;
   }
+  .mrv-flow-container {
+    @apply w-full max-w-3xl mx-auto px-2.5 sm:px-4 pb-2 space-y-3 sm:space-y-4;
+    width: 100%;
+    max-width: min(48rem, 100%);
+    box-sizing: border-box;
+  }
+  .mrv-completed-strip {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 3rem;
+  }
+  .mrv-panel {
+    @apply bg-card rounded-2xl border border-border/80 shadow-sm p-4 sm:p-5 mb-3;
+  }
+  .mrv-panel-accent {
+    @apply border-l-4 border-l-primary;
+  }
+  .mrv-panel-header {
+    @apply flex flex-wrap items-center gap-2 mb-4;
+  }
+  .mrv-panel-title {
+    @apply text-base sm:text-lg font-bold text-foreground;
+  }
+  .mrv-step-pill {
+    @apply text-[10px] font-bold uppercase tracking-wider text-primary-foreground bg-primary px-2.5 py-1 rounded-full;
+  }
+  .mrv-hero-card {
+    @apply mrv-panel bg-gradient-to-br from-card via-card to-primary/5 p-5 sm:p-6;
+  }
+  .mrv-choice-btn {
+    @apply min-h-[56px] rounded-xl border-2 font-bold text-base flex items-center justify-center gap-2 transition-all active:scale-[0.98];
+  }
+  .mrv-choice-success {
+    @apply border-success/30 bg-success/5 text-success;
+  }
+  .mrv-choice-danger {
+    @apply border-destructive/30 bg-destructive/5 text-destructive;
+  }
+  .mrv-choice-active.mrv-choice-success {
+    @apply bg-success text-success-foreground border-success shadow-md ring-4 ring-success/20;
+  }
+  .mrv-choice-active.mrv-choice-danger {
+    @apply bg-destructive text-destructive-foreground border-destructive shadow-md ring-4 ring-destructive/20;
+  }
+  .mrv-dosis-btn {
+    @apply min-h-[64px] rounded-xl border-2 border-border bg-background flex flex-col items-center justify-center gap-0.5 transition-all active:scale-[0.98];
+  }
+  .mrv-dosis-active-success {
+    @apply border-success bg-success/10 ring-2 ring-success/30;
+  }
+  .mrv-dosis-active-primary {
+    @apply border-primary bg-primary/10 ring-2 ring-primary/30;
+  }
+  .mrv-btn-primary {
+    @apply w-full min-h-[56px] rounded-xl bg-primary text-primary-foreground font-bold text-base shadow-md active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2;
+  }
+  .mrv-btn-success {
+    @apply w-full min-h-[56px] rounded-xl bg-success text-success-foreground font-bold text-base shadow-md active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2;
+  }
+  .mrv-btn-ghost {
+    @apply w-full min-h-[48px] rounded-xl border-2 border-border bg-card font-semibold active:scale-[0.98];
+  }
   .section-title {
     @apply text-xs font-bold uppercase tracking-wider text-primary mb-3 flex items-center gap-2;
   }
   .field-label {
     @apply text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 block;
   }
+  .mrv-field-text {
+    text-transform: uppercase;
+  }
+  .mrv-field-text::placeholder {
+    text-transform: none;
+  }
   .counter-btn {
     @apply rounded-xl font-bold text-xl flex items-center justify-center shadow-sm active:scale-90 transition-transform;
   }
   .nav-tab {
     @apply flex-1 py-2.5 px-2 font-semibold text-center transition-all duration-200 flex flex-col items-center;
+  }
+  .croquis-cinema {
+    display: grid;
+    gap: 0.4rem;
+    justify-items: stretch;
+    padding: 0.75rem;
+    border-radius: 1rem;
+    background: linear-gradient(180deg, hsl(var(--muted) / 0.35) 0%, hsl(var(--card)) 100%);
+  }
+  .croquis-seat {
+    @apply relative flex flex-col items-center justify-center rounded-xl border-2 min-h-[3rem] sm:min-h-[3.5rem] p-1 transition-all touch-manipulation;
+  }
+  .croquis-seat-active {
+    @apply ring-4 ring-primary/40 ring-offset-2 border-primary scale-[1.03] z-10 shadow-lg bg-card;
+  }
+  .croquis-seat-done {
+    @apply cursor-default;
+  }
+  .croquis-seat-num {
+    @apply text-sm font-black leading-none;
+  }
+  .croquis-seat-code {
+    @apply text-[10px] font-black px-1 rounded mt-0.5 leading-none;
+  }
+  .croquis-seat-meta {
+    @apply text-[9px] text-muted-foreground;
+  }
+  .croquis-house-stage {
+    @apply rounded-2xl border border-border/80 bg-gradient-to-b from-muted/30 to-card p-4 sm:p-6;
+  }
+  .croquis-house-progress {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    justify-content: center;
+    margin-bottom: 1rem;
+    max-height: 4.5rem;
+    overflow-y: auto;
+  }
+  .croquis-house-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 9999px;
+    background: hsl(var(--muted-foreground) / 0.35);
+  }
+  .croquis-house-dot-active {
+    width: 0.65rem;
+    height: 0.65rem;
+    background: hsl(var(--primary));
+    box-shadow: 0 0 0 3px hsl(var(--primary) / 0.25);
+  }
+  .croquis-house-dot-done {
+    background: hsl(var(--success));
+  }
+  .croquis-house-dot-visited {
+    background: hsl(var(--warning) / 0.85);
+  }
+  .croquis-house-visual {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 8rem;
+  }
+  .croquis-house-img {
+    width: 7.5rem;
+    height: 7.5rem;
+    object-fit: contain;
+    filter: drop-shadow(0 4px 12px rgb(0 0 0 / 0.12));
+  }
+  .croquis-house-badge {
+    position: absolute;
+    bottom: 0.25rem;
+    right: calc(50% - 5.5rem);
+    @apply bg-primary text-primary-foreground font-black text-lg px-3 py-1 rounded-full shadow-md;
   }
   .nav-tab-active {
     @apply text-primary;
@@ -191,7 +378,15 @@
     @apply w-full min-h-[3rem] px-4 rounded-xl border bg-background text-foreground text-base sm:text-sm focus:ring-2 focus:ring-ring focus:border-primary outline-none transition-all;
   }
   .auth-shell {
-    @apply min-h-dvh w-full flex flex-col lg:grid lg:grid-cols-2;
+    @apply min-h-dvh w-full flex flex-col;
+  }
+
+  .auth-login-bg {
+    background: linear-gradient(145deg, #0055a4 0%, #004080 42%, #002d5c 100%);
+  }
+
+  .dark .auth-login-bg {
+    background: linear-gradient(145deg, #003d7a 0%, #002952 50%, #0f172a 100%);
   }
 
   .dash-card {

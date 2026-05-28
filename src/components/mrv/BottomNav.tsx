@@ -7,7 +7,7 @@ interface Props {
 }
 
 const TABS = [
-  { id: 'registro', label: 'Registro', Icon: ClipboardList },
+  { id: 'registro', label: 'Monitoreo', Icon: ClipboardList },
   { id: 'dashboard', label: 'Dashboard', Icon: BarChart3 },
   { id: 'mapa', label: 'Mapa', Icon: MapPin },
 ];

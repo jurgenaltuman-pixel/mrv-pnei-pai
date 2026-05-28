@@ -2,7 +2,17 @@ import { useState, useCallback } from 'react';
 import { dataService, type PersonaBase } from '@/services/dataService';
 import { Search, Check, X, User, CreditCard } from 'lucide-react';
 import { esCodigoTemporal, validarFormatoCodigoTemporal } from '@/lib/temp-code-rve';
+import AddPadronPersonaForm from '@/components/mrv/AddPadronPersonaForm';
 import { TIPOS_DOCUMENTO_MRV, tipoDocumentoSoloDigitos } from '@/lib/tipos-documento-mrv';
+import { formatEdadPersona, parseHistorialSprDb, type HistorialSprCompleto } from '@/lib/padron-spr';
+import { formatFechaPy } from '@/lib/format-fecha';
+import { validarBusquedaPersonal } from '@/lib/busqueda-personal';
+import { upperText } from '@/lib/text-uppercase';
+import { resolveSexoPersona } from '@/lib/persona-sexo';
+import { resolveFechaNacimientoPersona } from '@/lib/persona-fecha';
+import PadronSprHistorial from '@/components/mrv/PadronSprHistorial';
+import FechaInputPy from '@/components/mrv/FechaInputPy';
+import { useToast } from '@/hooks/use-toast';
 
 interface Props {
   visitaSinDatosNino?: boolean;
@@ -23,13 +33,11 @@ interface Props {
   /** Nombre de la madre (solo lectura si viene de la persona encontrada). */
   nombreMadre: string;
   documentoMadre: string;
+  setNombreMadre?: (v: string) => void;
   setDocumentoMadre?: (v: string) => void;
-  regionNombre: string;
-  distritoNombre: string;
-  servicioNombre: string;
-  barrio: string;
-  regionCodigo?: string;
-  distritoCodigo?: string;
+  regionSanitaria?: string;
+  distrito?: string;
+  servicioSalud?: string;
 }
 
 type SearchMode = 'documento' | 'personales';
@@ -38,8 +46,10 @@ type SearchMode = 'documento' | 'personales';
 const BTN_MRV = 'bg-[#0055A4] hover:bg-[#003d7a] text-white shadow-md';
 
 export default function ChildDataSection(props: Props) {
+  const { toast } = useToast();
   const [sugerencias, setSugerencias] = useState<PersonaBase[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [searchMode, setSearchMode] = useState<SearchMode>('documento');
 
   const [tipoDoc, setTipoDoc] = useState('CI');
@@ -52,6 +62,52 @@ export default function ChildDataSection(props: Props) {
   const [ciMadrePadre, setCiMadrePadre] = useState('');
   const [fechaNacBusqueda, setFechaNacBusqueda] = useState('');
   const [sexoBusqueda, setSexoBusqueda] = useState<'M' | 'F' | ''>('');
+  const [historialSpr, setHistorialSpr] = useState<HistorialSprCompleto | null>(null);
+  const [historialLoading, setHistorialLoading] = useState(false);
+  const [mostrarAltaPadron, setMostrarAltaPadron] = useState(false);
+  const [docNoEncontrado, setDocNoEncontrado] = useState('');
+
+  const cargarHistorialSpr = useCallback(async (p: PersonaBase) => {
+    setHistorialLoading(true);
+    setHistorialSpr(null);
+    const h = await dataService.getHistorialSpr(p.documento, p.tipo_documento || tipoDoc);
+    if (h && !h.padron && p.historial_spr) {
+      const padronParsed = parseHistorialSprDb(p.historial_spr);
+      setHistorialSpr({
+        ...h,
+        padron: padronParsed
+          ? {
+              ...padronParsed,
+              edad_anos: p.edad_anos ?? padronParsed.edad_anos,
+              edad_meses: p.edad_meses ?? padronParsed.edad_meses,
+            }
+          : null,
+      });
+    } else {
+      setHistorialSpr(h);
+    }
+    setHistorialLoading(false);
+  }, [tipoDoc]);
+
+  const seleccionar = useCallback(
+    (p: PersonaBase) => {
+      props.setNombre(upperText(p.nombre));
+      props.setDocumento(p.documento);
+      const fn = resolveFechaNacimientoPersona(p);
+      if (fn) props.setFechaNacimiento(fn);
+      const sexoNorm = resolveSexoPersona(p);
+      if (sexoNorm) {
+        props.setSexo(sexoNorm);
+      }
+      if (p.documento_madre && props.setDocumentoMadre) props.setDocumentoMadre(p.documento_madre);
+      props.onPersonaSeleccionada(p);
+      setSugerencias([]);
+      setMostrarAltaPadron(false);
+      setDocNoEncontrado('');
+      void cargarHistorialSpr(p);
+    },
+    [props, cargarHistorialSpr]
+  );
 
   const buscarPorDocumento = useCallback(async () => {
     if (props.visitaSinDatosNino) return;
@@ -64,27 +120,60 @@ export default function ChildDataSection(props: Props) {
       return;
     }
     setSearching(true);
+    setMostrarAltaPadron(false);
     const results = await dataService.buscarPersonasPorDocumento(raw, tipoDoc, 25);
     setSugerencias(results);
+    if (results.length === 1) {
+      seleccionar(results[0]);
+    } else if (results.length === 0) {
+      setHistorialSpr(null);
+      setDocNoEncontrado(normalized);
+      setMostrarAltaPadron(true);
+      toast({
+        title: 'No encontrado en el padrón',
+        description:
+          'No hay coincidencia con ese documento. Completá el formulario para añadir a la persona al padrón.',
+        variant: 'destructive',
+      });
+    } else {
+      setDocNoEncontrado('');
+    }
     setSearching(false);
-  }, [docBusqueda, tipoDoc, props.visitaSinDatosNino]);
+  }, [docBusqueda, tipoDoc, props.visitaSinDatosNino, seleccionar, toast]);
 
   const buscarDatosPersonales = useCallback(async () => {
     if (props.visitaSinDatosNino) return;
+    const val = validarBusquedaPersonal({
+      nombre1,
+      nombre2,
+      apellido1,
+      apellido2,
+      documentoMadrePadre: ciMadrePadre,
+      fechaNacimiento: fechaNacBusqueda,
+      sexo: sexoBusqueda || undefined,
+    });
+    if (!val.ok || !val.filtros) {
+      setSearchError(val.error || 'Criterios inválidos');
+      setSugerencias([]);
+      return;
+    }
+    setSearchError(null);
     setSearching(true);
-    const results = await dataService.buscarPersonasDatosPersonales(
-      {
-        nombre1,
-        nombre2,
-        apellido1,
-        apellido2,
-        documentoMadrePadre: ciMadrePadre,
-        fechaNacimiento: fechaNacBusqueda,
-        sexo: sexoBusqueda || undefined,
-      },
-      25
-    );
+    const results = await dataService.buscarPersonasDatosPersonales(val.filtros, 25);
     setSugerencias(results);
+    if (results.length === 1) {
+      seleccionar(results[0]);
+    }
+    if (results.length === 0) {
+      setMostrarAltaPadron(true);
+      toast({
+        title: 'No encontrado en el padrón',
+        description: 'Completá el formulario para añadir a la persona al padrón.',
+        variant: 'destructive',
+      });
+    } else {
+      setMostrarAltaPadron(false);
+    }
     setSearching(false);
   }, [
     nombre1,
@@ -95,17 +184,9 @@ export default function ChildDataSection(props: Props) {
     fechaNacBusqueda,
     sexoBusqueda,
     props.visitaSinDatosNino,
+    toast,
+    seleccionar,
   ]);
-
-  const seleccionar = (p: PersonaBase) => {
-    props.setNombre(p.nombre);
-    props.setDocumento(p.documento);
-    if (p.fecha_nacimiento) props.setFechaNacimiento(p.fecha_nacimiento);
-    if (p.sexo) props.setSexo(p.sexo);
-    if (p.documento_madre && props.setDocumentoMadre) props.setDocumentoMadre(p.documento_madre);
-    props.onPersonaSeleccionada(p);
-    setSugerencias([]);
-  };
 
   const handleDocChange = (raw: string) => {
     if (props.sinDocumento || esCodigoTemporal(raw)) {
@@ -133,8 +214,21 @@ export default function ChildDataSection(props: Props) {
               {p.tipo_documento || 'CI'} {p.documento}
             </span>
             {p.fecha_nacimiento && (
-              <span className="block text-[10px] text-muted-foreground">FN: {p.fecha_nacimiento}</span>
+              <span className="block text-[10px] text-muted-foreground">
+                FN: {formatFechaPy(p.fecha_nacimiento)}
+              </span>
             )}
+            {(() => {
+              const edad = formatEdadPersona(p, p.fecha_nacimiento ?? undefined);
+              return edad ? (
+                <span className="block text-[10px] text-primary/90 font-medium">{edad}</span>
+              ) : null;
+            })()}
+            {p.historial_spr?.dosis?.length ? (
+              <span className="block text-[10px] text-muted-foreground">
+                SPR: {p.historial_spr.dosis.length} dosis en nómina
+              </span>
+            ) : null}
           </button>
         ))}
       </div>
@@ -252,8 +346,8 @@ export default function ChildDataSection(props: Props) {
                       </label>
                       <input
                         value={nombre1}
-                        onChange={(e) => setNombre1(e.target.value)}
-                        className="w-full h-10 px-2 rounded-lg border bg-background text-sm"
+                        onChange={(e) => setNombre1(upperText(e.target.value))}
+                        className="w-full h-10 px-2 rounded-lg border bg-background text-sm mrv-field-text"
                       />
                     </div>
                     <div>
@@ -262,8 +356,8 @@ export default function ChildDataSection(props: Props) {
                       </label>
                       <input
                         value={nombre2}
-                        onChange={(e) => setNombre2(e.target.value)}
-                        className="w-full h-10 px-2 rounded-lg border bg-background text-sm"
+                        onChange={(e) => setNombre2(upperText(e.target.value))}
+                        className="w-full h-10 px-2 rounded-lg border bg-background text-sm mrv-field-text"
                       />
                     </div>
                     <div>
@@ -272,8 +366,8 @@ export default function ChildDataSection(props: Props) {
                       </label>
                       <input
                         value={apellido1}
-                        onChange={(e) => setApellido1(e.target.value)}
-                        className="w-full h-10 px-2 rounded-lg border bg-background text-sm"
+                        onChange={(e) => setApellido1(upperText(e.target.value))}
+                        className="w-full h-10 px-2 rounded-lg border bg-background text-sm mrv-field-text"
                       />
                     </div>
                     <div>
@@ -282,8 +376,8 @@ export default function ChildDataSection(props: Props) {
                       </label>
                       <input
                         value={apellido2}
-                        onChange={(e) => setApellido2(e.target.value)}
-                        className="w-full h-10 px-2 rounded-lg border bg-background text-sm"
+                        onChange={(e) => setApellido2(upperText(e.target.value))}
+                        className="w-full h-10 px-2 rounded-lg border bg-background text-sm mrv-field-text"
                       />
                     </div>
                   </div>
@@ -302,13 +396,13 @@ export default function ChildDataSection(props: Props) {
                     </div>
                     <div>
                       <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide block mb-1">
-                        Fecha de nacimiento
+                        Fecha nac. (dd/mm/aaaa o DDMMAAAA)
                       </label>
-                      <input
-                        type="date"
+                      <FechaInputPy
                         value={fechaNacBusqueda}
-                        onChange={(e) => setFechaNacBusqueda(e.target.value)}
+                        onChange={setFechaNacBusqueda}
                         className="w-full h-10 px-2 rounded-lg border bg-background text-sm"
+                        placeholder="15/03/2015 o 15032015"
                       />
                     </div>
                     <div>
@@ -336,9 +430,12 @@ export default function ChildDataSection(props: Props) {
                       Buscar
                     </button>
                   </div>
+                  {searchError && (
+                    <p className="text-[11px] text-destructive font-medium">{searchError}</p>
+                  )}
                   <p className="text-[10px] text-muted-foreground">
-                    Puede buscar con iniciales o fragmentos (p. ej. «Ju» y «P») sin completar todos los campos; cada valor debe
-                    coincidir con el inicio de alguna palabra del nombre en padrón.
+                    Basta con un criterio válido: un nombre, dos nombres, solo apellido, solo fecha de nacimiento (dd/mm/aaaa o
+                    DDMMAAAA), solo CI de la madre/padre, o sexo. Si completa varios, todos deben coincidir en el padrón.
                   </p>
                   <hr className="border-t border-dotted border-muted-foreground/40" />
                   <button
@@ -359,6 +456,21 @@ export default function ChildDataSection(props: Props) {
           </div>
         )}
 
+        {!props.visitaSinDatosNino && mostrarAltaPadron && (
+          <AddPadronPersonaForm
+            documentoSugerido={docNoEncontrado || docBusqueda}
+            regionSanitaria={props.regionSanitaria}
+            distrito={props.distrito}
+            servicioSalud={props.servicioSalud}
+            onGuardada={(p) => seleccionar(p)}
+            onCancelar={() => setMostrarAltaPadron(false)}
+          />
+        )}
+
+        {!props.visitaSinDatosNino && props.documento.length >= 4 && (
+          <PadronSprHistorial historial={historialSpr} loading={historialLoading} />
+        )}
+
         {!props.visitaSinDatosNino && (
           <div>
             <label className="field-label flex items-center gap-1">
@@ -367,8 +479,8 @@ export default function ChildDataSection(props: Props) {
             <input
               type="text"
               value={props.nombre}
-              onChange={(e) => props.setNombre(e.target.value)}
-              className="w-full h-11 px-3 rounded-lg border bg-background text-sm"
+              onChange={(e) => props.setNombre(upperText(e.target.value))}
+              className="w-full h-11 px-3 rounded-lg border bg-background text-sm mrv-field-text"
               placeholder="Apellidos y nombres según documento"
               title="Nombre completo"
             />
@@ -385,7 +497,7 @@ export default function ChildDataSection(props: Props) {
             className={`w-full h-10 px-3 rounded-lg border bg-background text-sm font-mono ${
               props.sinDocumento && !codigoTmpValido ? 'border-destructive' : ''
             }`}
-            placeholder={props.sinDocumento ? 'TMP-XXX00-XXXXX (editable)' : 'Número de CI'}
+            placeholder={props.sinDocumento ? 'Iniciales + DDMMAAAA (ej. MEG15032015)' : 'Número de CI'}
             inputMode={props.sinDocumento ? 'text' : 'numeric'}
           />
           <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -395,7 +507,7 @@ export default function ChildDataSection(props: Props) {
                 checked={props.sinDocumento}
                 onChange={(e) => props.setSinDocumento(e.target.checked)}
               />
-              Sin CI — código temporal RVe
+              Sin CI — iniciales + fecha de nacimiento
             </label>
             {props.sinDocumento && (
               <button
@@ -409,7 +521,7 @@ export default function ChildDataSection(props: Props) {
           </div>
           {props.sinDocumento && (
             <p className="text-[10px] text-muted-foreground mt-1">
-              Puede editar el código según lineamientos oficiales del RVe.
+              Código: iniciales del nombre + fecha de nacimiento (DDMMAAAA). Complete nombre y fecha antes de generar.
             </p>
           )}
         </div>
@@ -418,12 +530,7 @@ export default function ChildDataSection(props: Props) {
           <label className="field-label flex items-center gap-1">
             Fecha de Nacimiento {!props.visitaSinDatosNino && <span className="text-destructive font-bold">*</span>}
           </label>
-          <input
-            type="date"
-            value={props.fechaNacimiento}
-            onChange={(e) => props.setFechaNacimiento(e.target.value)}
-            className="w-full h-10 px-3 rounded-lg border bg-background text-sm"
-          />
+          <FechaInputPy value={props.fechaNacimiento} onChange={props.setFechaNacimiento} />
         </div>
 
         {props.fechaNacimiento && (
@@ -446,9 +553,12 @@ export default function ChildDataSection(props: Props) {
                 key={s}
                 type="button"
                 onClick={() => props.setSexo(s)}
-                className={`flex-1 h-10 rounded-lg font-semibold text-sm ${
-                  props.sexo === s ? 'bg-primary text-primary-foreground' : 'bg-secondary'
+                className={`flex-1 h-10 rounded-lg font-semibold text-sm border transition-colors ${
+                  props.sexo === s
+                    ? 'bg-primary text-primary-foreground border-primary shadow-md ring-2 ring-primary/40'
+                    : 'bg-secondary text-secondary-foreground border-border hover:bg-muted'
                 }`}
+                aria-pressed={props.sexo === s}
               >
                 {s === 'M' ? 'Masculino' : 'Femenino'}
               </button>
@@ -459,36 +569,24 @@ export default function ChildDataSection(props: Props) {
         {!props.visitaSinDatosNino && (
           <div className="rounded-lg border p-3 space-y-2 bg-muted/30">
             <p className="text-xs font-bold uppercase text-muted-foreground flex items-center gap-1">
-              <User className="w-3.5 h-3.5" /> Madre (RVe)
+              <User className="w-3.5 h-3.5" /> Madre (RVe) <span className="text-destructive">*</span>
             </p>
             <input
               value={props.documentoMadre}
               onChange={(e) => props.setDocumentoMadre?.(e.target.value.replace(/\D/g, ''))}
               className="w-full h-9 px-2 rounded-lg border bg-background text-sm"
-              placeholder="CI de la madre"
+              placeholder="CI de la madre (6–8 dígitos) *"
               inputMode="numeric"
             />
-            {props.nombreMadre && <p className="text-xs text-muted-foreground">Nombre: {props.nombreMadre}</p>}
+            <input
+              value={props.nombreMadre}
+              onChange={(e) => props.setNombreMadre?.(e.target.value)}
+              className="w-full h-9 px-2 rounded-lg border bg-background text-sm"
+              placeholder="Nombre completo de la madre *"
+            />
           </div>
         )}
 
-        {(props.regionNombre || props.barrio) && (
-          <div className="rounded-lg border bg-primary/5 p-3 text-xs space-y-1">
-            <p className="font-semibold">Ubicación</p>
-            <p className="text-muted-foreground">
-              <b>Región:</b> {props.regionNombre || '—'}
-            </p>
-            <p className="text-muted-foreground">
-              <b>Distrito:</b> {props.distritoNombre || '—'}
-            </p>
-            <p className="text-muted-foreground">
-              <b>Servicio:</b> {props.servicioNombre || '—'}
-            </p>
-            <p className="text-muted-foreground">
-              <b>Barrio:</b> {props.barrio || '—'}
-            </p>
-          </div>
-        )}
       </div>
     </div>
   );

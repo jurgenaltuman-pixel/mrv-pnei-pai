@@ -5,22 +5,49 @@ interface GeoState {
   lng: number | null;
   status: 'loading' | 'success' | 'error' | 'denied';
   isApproximate: boolean;
+  /** Precisión en metros (null si desconocida). */
+  accuracyM: number | null;
+  /** Sin conexión de datos: se usa última posición conocida. */
+  offlineCached: boolean;
 }
 
-const CACHE_KEY = 'mrv_last_gps';
+const CACHE_KEY = 'mrv_last_gps_v2';
 
-function getCachedGeo(): { lat: number; lng: number } | null {
+interface CachedGeo {
+  lat: number;
+  lng: number;
+  accuracy?: number | null;
+  at: number;
+}
+
+function getCachedGeo(): CachedGeo | null {
   try {
-    const cached = localStorage.getItem(CACHE_KEY);
-    if (cached) return JSON.parse(cached);
-  } catch {}
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CachedGeo;
+    if (typeof parsed.lat === 'number' && typeof parsed.lng === 'number') return parsed;
+  } catch {
+    try {
+      const legacy = localStorage.getItem('mrv_last_gps');
+      if (legacy) {
+        const p = JSON.parse(legacy) as { lat: number; lng: number };
+        return { lat: p.lat, lng: p.lng, accuracy: null, at: Date.now() };
+      }
+    } catch {
+      /* ignore */
+    }
+  }
   return null;
 }
 
-function setCachedGeo(lat: number, lng: number) {
+function setCachedGeo(lat: number, lng: number, accuracy: number | null) {
   try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify({ lat, lng }));
-  } catch {}
+    const payload: CachedGeo = { lat, lng, accuracy, at: Date.now() };
+    localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
+    localStorage.setItem('mrv_last_gps', JSON.stringify({ lat, lng }));
+  } catch {
+    /* ignore */
+  }
 }
 
 export function useGeolocation() {
@@ -30,35 +57,85 @@ export function useGeolocation() {
     lng: cached?.lng ?? null,
     status: cached ? 'success' : 'loading',
     isApproximate: Boolean(cached),
+    accuracyM: cached?.accuracy ?? null,
+    offlineCached: typeof navigator !== 'undefined' && !navigator.onLine && Boolean(cached),
   });
   const [retryToken, setRetryToken] = useState(0);
   const watchIdRef = useRef<number | null>(null);
 
-  const options = useMemo<PositionOptions>(() => ({
-    enableHighAccuracy: true,
-    timeout: 12000,
-    maximumAge: 5000,
-  }), []);
-  const fallbackOptions = useMemo<PositionOptions>(() => ({
-    enableHighAccuracy: false,
-    timeout: 20000,
-    maximumAge: 60000,
-  }), []);
+  const highAccuracy = useMemo<PositionOptions>(
+    () => ({
+      enableHighAccuracy: true,
+      timeout: 20000,
+      maximumAge: 0,
+    }),
+    []
+  );
+
+  const balanced = useMemo<PositionOptions>(
+    () => ({
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 8000,
+    }),
+    []
+  );
+
+  const lowPower = useMemo<PositionOptions>(
+    () => ({
+      enableHighAccuracy: false,
+      timeout: 25000,
+      maximumAge: 120000,
+    }),
+    []
+  );
 
   useEffect(() => {
+    const showCachedWhileLoading = () => {
+      const fallback = getCachedGeo();
+      if (!fallback) return;
+      setGeo((prev) => ({
+        lat: fallback.lat,
+        lng: fallback.lng,
+        status: prev.status === 'loading' ? 'loading' : 'success',
+        isApproximate: true,
+        accuracyM: fallback.accuracy ?? null,
+        offlineCached: !navigator.onLine,
+      }));
+    };
+
+    showCachedWhileLoading();
+
+    const applyOfflineCacheOnly = () => {
+      if (navigator.onLine) return false;
+      const fallback = getCachedGeo();
+      if (!fallback) return false;
+      setGeo((prev) => ({
+        lat: fallback.lat,
+        lng: fallback.lng,
+        status: 'success',
+        isApproximate: true,
+        accuracyM: fallback.accuracy ?? prev.accuracyM,
+        offlineCached: true,
+      }));
+      return true;
+    };
+
     if (!navigator.geolocation) {
-      setGeo(prev => ({ ...prev, status: 'error', isApproximate: false }));
+      setGeo((prev) => ({ ...prev, status: 'error', isApproximate: false, offlineCached: false }));
       return;
     }
 
     if (!window.isSecureContext) {
       const fallback = getCachedGeo();
-      setGeo(prev => ({
-        lat: prev.lat ?? fallback?.lat ?? null,
-        lng: prev.lng ?? fallback?.lng ?? null,
-        status: prev.lat || fallback ? 'success' : 'error',
-        isApproximate: Boolean(prev.lat ?? fallback?.lat) && Boolean(prev.lng ?? fallback?.lng),
-      }));
+      setGeo({
+        lat: fallback?.lat ?? null,
+        lng: fallback?.lng ?? null,
+        status: fallback ? 'success' : 'error',
+        isApproximate: true,
+        accuracyM: fallback?.accuracy ?? null,
+        offlineCached: false,
+      });
       return;
     }
 
@@ -66,20 +143,30 @@ export function useGeolocation() {
 
     const onSuccess = (pos: GeolocationPosition) => {
       if (!active) return;
-      const { latitude, longitude } = pos.coords;
-      setCachedGeo(latitude, longitude);
-      setGeo({ lat: latitude, lng: longitude, status: 'success', isApproximate: false });
+      const { latitude, longitude, accuracy } = pos.coords;
+      setCachedGeo(latitude, longitude, accuracy ?? null);
+      setGeo({
+        lat: latitude,
+        lng: longitude,
+        status: 'success',
+        isApproximate: false,
+        accuracyM: accuracy ?? null,
+        offlineCached: false,
+      });
     };
 
     const onError = (err: GeolocationPositionError) => {
       if (!active) return;
+      if (applyOfflineCacheOnly()) return;
       const fallback = getCachedGeo();
-      setGeo(prev => ({
+      const hasFallback = fallback != null;
+      setGeo((prev) => ({
         lat: prev.lat ?? fallback?.lat ?? null,
         lng: prev.lng ?? fallback?.lng ?? null,
-        // Si hay coordenadas previas válidas, evitamos falso rojo por timeout/intermitencia.
-        status: err.code === 1 ? 'denied' : (prev.lat ?? fallback?.lat) != null && (prev.lng ?? fallback?.lng) != null ? 'success' : 'error',
-        isApproximate: err.code !== 1 && (prev.lat ?? fallback?.lat) != null && (prev.lng ?? fallback?.lng) != null,
+        status: err.code === 1 ? 'denied' : hasFallback ? 'success' : 'error',
+        isApproximate: err.code !== 1 && hasFallback,
+        accuracyM: hasFallback ? (fallback?.accuracy ?? prev.accuracyM) : null,
+        offlineCached: false,
       }));
     };
 
@@ -90,10 +177,7 @@ export function useGeolocation() {
             onSuccess(pos);
             resolve(true);
           },
-          (err) => {
-            onError(err);
-            resolve(false);
-          },
+          () => resolve(false),
           posOptions
         );
       });
@@ -101,51 +185,68 @@ export function useGeolocation() {
     const startWatch = () => {
       if (watchIdRef.current !== null) {
         navigator.geolocation.clearWatch(watchIdRef.current);
-        watchIdRef.current = null;
       }
-      watchIdRef.current = navigator.geolocation.watchPosition(onSuccess, onError, options);
+      watchIdRef.current = navigator.geolocation.watchPosition(onSuccess, onError, highAccuracy);
     };
 
-    // Intento inicial: alta precisión y luego fallback de baja precisión.
-    void requestCurrentPosition(options).then((ok) => {
-      if (!ok && active) {
-        void requestCurrentPosition(fallbackOptions);
+    void (async () => {
+      if (!(await requestCurrentPosition(highAccuracy)) && active) {
+        if (!(await requestCurrentPosition(balanced)) && active) {
+          await requestCurrentPosition(lowPower);
+        }
       }
-    });
+    })();
+
     startWatch();
 
-    const onVisibility = () => {
+    const onOnline = () => {
       if (!active) return;
-      if (document.visibilityState === 'hidden') {
+      setGeo((prev) => ({ ...prev, offlineCached: false, status: 'loading' }));
+      void requestCurrentPosition(highAccuracy).then(() => startWatch());
+    };
+    const onOffline = () => {
+      if (!active) return;
+      setGeo((prev) => ({
+        ...prev,
+        offlineCached: prev.lat != null && prev.lng != null,
+      }));
+    };
+
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+
+    const onVisibility = () => {
+      if (!active || document.visibilityState === 'hidden') {
         if (watchIdRef.current !== null) {
           navigator.geolocation.clearWatch(watchIdRef.current);
           watchIdRef.current = null;
         }
         return;
       }
-      setGeo((prev) => ({ ...prev, status: prev.lat && prev.lng ? 'success' : 'loading' }));
-      void requestCurrentPosition(options).then((ok) => {
-        if (!ok && active) {
-          void requestCurrentPosition(fallbackOptions);
-        }
-      });
-      startWatch();
+      if (!navigator.onLine) {
+        showCachedWhileLoading();
+        startWatch();
+        return;
+      }
+      void requestCurrentPosition(highAccuracy).then(() => startWatch());
     };
     document.addEventListener('visibilitychange', onVisibility);
 
     return () => {
       active = false;
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
       document.removeEventListener('visibilitychange', onVisibility);
       if (watchIdRef.current !== null) {
         navigator.geolocation.clearWatch(watchIdRef.current);
         watchIdRef.current = null;
       }
     };
-  }, [retryToken, options, fallbackOptions]);
+  }, [retryToken, highAccuracy, balanced, lowPower]);
 
   const refresh = () => {
-    setGeo(prev => ({ ...prev, status: 'loading', isApproximate: false }));
-    setRetryToken(prev => prev + 1);
+    setGeo((prev) => ({ ...prev, status: 'loading', isApproximate: false, offlineCached: false }));
+    setRetryToken((prev) => prev + 1);
   };
 
   return { ...geo, refresh };

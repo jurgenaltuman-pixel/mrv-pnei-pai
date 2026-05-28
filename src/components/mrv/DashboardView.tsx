@@ -1,15 +1,14 @@
-import { lazy, Suspense, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   BarChart3,
-  Download,
   FileSpreadsheet,
+  FileText,
   TrendingUp,
   Syringe,
   XCircle,
   Home,
   RefreshCw,
 } from 'lucide-react';
-import * as XLSX from 'xlsx';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRole } from '@/hooks/useRole';
 import { useRegistrosQuery } from '@/hooks/useRegistrosQuery';
@@ -18,43 +17,19 @@ import { contadorDesdeDashboard } from '@/lib/housing-stats';
 import HousingStatsPanel from '@/components/mrv/HousingStatsPanel';
 import type { DashboardData, RegistroMRV } from '@/services/dataService';
 import { PageSkeleton } from '@/components/mrv/PageSkeleton';
-import { supabase } from '@/integrations/supabase/client';
-import { useQuery } from '@tanstack/react-query';
+import { downloadRegistrosExcel } from '@/lib/export-registros-excel';
+import { downloadDashboardPdf } from '@/lib/export-dashboard-pdf';
+import { filterRegistrosByDate, type DateRangePreset } from '@/lib/registros-date-filter';
+import {
+  filterRegistrosByProfileScope,
+  hasProfileScopeAssignment,
+} from '@/lib/registro-scope';
+import { useProfileScope } from '@/hooks/useProfileScope';
+import { getJornadaStats } from '@/lib/jornada-storage';
+import JornadaSummary from '@/components/mrv/JornadaSummary';
 
 const DashboardCharts = lazy(() => import('@/components/mrv/DashboardCharts'));
 const MrvMapPanel = lazy(() => import('@/components/mrv/MrvMapPanel'));
-
-function exportCSV(data: DashboardData) {
-  const rows = [['Distrito', 'Vacunados', 'No Vacunados', 'Cobertura %']];
-  Object.entries(data.porDistrito).forEach(([d, v]) => {
-    const total = v.vacunados + v.noVacunados;
-    rows.push([d, String(v.vacunados), String(v.noVacunados), total > 0 ? ((v.vacunados / total) * 100).toFixed(1) : '0']);
-  });
-  const blob = new Blob(['\ufeff' + rows.map((r) => r.join(',')).join('\n')], { type: 'text/csv;charset=utf-8;' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `MRV_${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-}
-
-async function exportExcel(registros: RegistroMRV[]) {
-  const ws = XLSX.utils.json_to_sheet(
-    registros.map((r) => ({
-      Fecha: r.fecha_hora,
-      Region: r.region,
-      Distrito: r.distrito,
-      Nombre: r.nombre,
-      Documento: r.documento,
-      Estado: r.estado_vacuna,
-      Motivo: r.motivo,
-      Latitud: r.latitud,
-      Longitud: r.longitud,
-    }))
-  );
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Registros');
-  XLSX.writeFile(wb, `MRV_Registros_${new Date().toISOString().slice(0, 10)}.xlsx`);
-}
 
 function KpiCard({
   label,
@@ -85,58 +60,97 @@ function KpiCard({
 export default function DashboardView() {
   const { user } = useAuth();
   const { isAdmin, isSuperAdmin } = useRole();
-  const { data: registros = [], isLoading, isFetching, refetch } = useRegistrosQuery(2500, true);
+  const { data: profileScope } = useProfileScope();
+  const tieneAsignacionZonal = hasProfileScopeAssignment(profileScope);
+  const [vistaNacional, setVistaNacional] = useState(true);
+  const usarVistaNacional =
+    (isAdmin || isSuperAdmin) && (!tieneAsignacionZonal || vistaNacional);
 
-  const { data: profileScope } = useQuery({
-    queryKey: ['profile-scope', user?.id],
-    queryFn: async () => {
-      if (!user?.id) return null;
-      const { data } = await supabase
-        .from('profiles')
-        .select('scope_locked, assigned_barrio')
-        .eq('user_id', user.id)
-        .maybeSingle();
-      return data;
-    },
-    enabled: Boolean(user?.id),
-    staleTime: 5 * 60_000,
-  });
+  const {
+    data: registros = [],
+    isLoading,
+    isFetching,
+    isError,
+    error,
+    refetch,
+  } = useRegistrosQuery(5000, Boolean(user?.id), { national: usarVistaNacional });
 
+  const [datePreset, setDatePreset] = useState<DateRangePreset>('hoy');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
   const [regionFilter, setRegionFilter] = useState('todas');
   const [distritoFilter, setDistritoFilter] = useState('todos');
+  const [servicioFilter, setServicioFilter] = useState('todos');
   const [chartMode, setChartMode] = useState<'stacked' | 'coverage'>('stacked');
   const [exporting, setExporting] = useState(false);
+  const [jornadaStats, setJornadaStats] = useState(() => getJornadaStats(''));
+
+  const refreshJornada = useCallback(() => {
+    if (!user?.id) return;
+    setJornadaStats(getJornadaStats(user.id));
+  }, [user?.id]);
+
+  useEffect(() => {
+    refreshJornada();
+  }, [refreshJornada]);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshJornada();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [refreshJornada]);
 
   const normalize = (v: string | null | undefined) =>
     (v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
 
   const registrosVisibles = useMemo(() => {
-    if (isAdmin || isSuperAdmin) return registros;
-    if (profileScope?.scope_locked && profileScope.assigned_barrio) {
-      const b = normalize(profileScope.assigned_barrio);
-      return registros.filter((r) => normalize(r.barrio) === b);
+    if (isAdmin || isSuperAdmin) {
+      return filterRegistrosByProfileScope(registros, profileScope, {
+        forceNational: usarVistaNacional,
+      });
+    }
+    if (hasProfileScopeAssignment(profileScope)) {
+      return filterRegistrosByProfileScope(registros, profileScope);
     }
     return registros;
-  }, [registros, isAdmin, isSuperAdmin, profileScope]);
+  }, [registros, isAdmin, isSuperAdmin, profileScope, usarVistaNacional]);
+
+  const registrosPorFecha = useMemo(
+    () => filterRegistrosByDate(registrosVisibles, datePreset, customFrom, customTo),
+    [registrosVisibles, datePreset, customFrom, customTo]
+  );
 
   const regionesDisponibles = useMemo(
-    () => Array.from(new Set(registrosVisibles.map((r) => r.region).filter(Boolean))).sort(),
-    [registrosVisibles]
+    () => Array.from(new Set(registrosPorFecha.map((r) => r.region).filter(Boolean))).sort(),
+    [registrosPorFecha]
   );
 
   const distritosDisponibles = useMemo(() => {
-    const base = regionFilter === 'todas' ? registrosVisibles : registrosVisibles.filter((r) => r.region === regionFilter);
+    const base = regionFilter === 'todas' ? registrosPorFecha : registrosPorFecha.filter((r) => r.region === regionFilter);
     return Array.from(new Set(base.map((r) => r.distrito).filter(Boolean))).sort();
-  }, [registrosVisibles, regionFilter]);
+  }, [registrosPorFecha, regionFilter]);
+
+  const serviciosDisponibles = useMemo(() => {
+    let base = registrosPorFecha;
+    if (regionFilter !== 'todas') base = base.filter((r) => r.region === regionFilter);
+    if (distritoFilter !== 'todos') base = base.filter((r) => r.distrito === distritoFilter);
+    return Array.from(new Set(base.map((r) => r.servicio?.trim()).filter(Boolean) as string[])).sort(
+      (a, b) => a.localeCompare(b, 'es')
+    );
+  }, [registrosPorFecha, regionFilter, distritoFilter]);
 
   const registrosFiltrados = useMemo(
     () =>
-      registrosVisibles.filter(
-        (r) =>
-          (regionFilter === 'todas' || r.region === regionFilter) &&
-          (distritoFilter === 'todos' || r.distrito === distritoFilter)
-      ),
-    [registrosVisibles, regionFilter, distritoFilter]
+      registrosPorFecha.filter((r) => {
+        if (regionFilter !== 'todas' && r.region !== regionFilter) return false;
+        if (distritoFilter !== 'todos' && r.distrito !== distritoFilter) return false;
+        if (servicioFilter === 'todos') return true;
+        if (servicioFilter === '_sin_servicio') return !r.servicio?.trim();
+        return (r.servicio?.trim() || '') === servicioFilter;
+      }),
+    [registrosPorFecha, regionFilter, distritoFilter, servicioFilter]
   );
 
   const data = useMemo(() => buildDashboardData(registrosFiltrados), [registrosFiltrados]);
@@ -156,6 +170,20 @@ export default function DashboardView() {
             {registrosFiltrados.length} registros · {conGps} con GPS
             {isFetching && ' · actualizando…'}
           </p>
+          {(isAdmin || isSuperAdmin) && (
+            <p className="text-[10px] text-primary font-semibold mt-1">
+              {usarVistaNacional
+                ? 'Vista nacional (todos los registros)'
+                : `Vista zonal: ${profileScope?.assigned_region} · ${profileScope?.assigned_distrito}${
+                    profileScope?.assigned_servicio ? ` · ${profileScope.assigned_servicio}` : ''
+                  }`}
+            </p>
+          )}
+          {isError && (
+            <p className="text-[10px] text-destructive font-semibold mt-1">
+              No se pudieron cargar registros: {(error as Error)?.message || 'error de red'}
+            </p>
+          )}
         </div>
         <div className="flex gap-1.5 shrink-0">
           <button
@@ -166,37 +194,176 @@ export default function DashboardView() {
           >
             <RefreshCw className={`w-4 h-4 ${isFetching ? 'animate-spin' : ''}`} />
           </button>
-          <button type="button" onClick={() => exportCSV(data)} className="dash-btn-secondary">
-            <Download className="w-3.5 h-3.5" /> CSV
-          </button>
           <button
             type="button"
-            disabled={exporting}
-            onClick={async () => {
+            disabled={exporting || !registrosVisibles.length}
+            onClick={() => {
               setExporting(true);
               try {
-                await exportExcel(registrosVisibles);
+                const periodoLabel =
+                  datePreset === 'custom'
+                    ? `personalizado (${customFrom || '…'} – ${customTo || '…'})`
+                    : datePreset;
+                downloadRegistrosExcel(registrosVisibles, 'MRV_Registros', {
+                  total: registrosVisibles.length,
+                  nota: `Exportación completa del ámbito visible (${registrosVisibles.length} filas). El panel puede mostrar período «${periodoLabel}»; el Excel incluye todos los registros del ámbito con GPS WGS84 y enlace_google_maps.`,
+                });
               } finally {
                 setExporting(false);
               }
             }}
-            className="dash-btn-primary"
+            className="dash-btn-secondary"
           >
             <FileSpreadsheet className="w-3.5 h-3.5" /> Excel
+          </button>
+          <button
+            type="button"
+            onClick={() => downloadDashboardPdf(data, 'Panel · filtros aplicados')}
+            className="dash-btn-primary"
+          >
+            <FileText className="w-3.5 h-3.5" /> PDF
           </button>
         </div>
       </div>
 
-      <div className="dash-filters grid grid-cols-1 sm:grid-cols-3 gap-2">
-        <select aria-label="Filtrar por región" value={regionFilter} onChange={(e) => { setRegionFilter(e.target.value); setDistritoFilter('todos'); }} className="dash-select">
+      {user && <JornadaSummary stats={jornadaStats} />}
+
+      {(isAdmin || isSuperAdmin) && tieneAsignacionZonal && (
+        <label className="flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2.5 text-sm cursor-pointer">
+          <input
+            type="checkbox"
+            checked={vistaNacional}
+            onChange={(e) => setVistaNacional(e.target.checked)}
+            className="rounded border-input"
+          />
+          <span className="font-medium">Ver todos los registros (vista nacional)</span>
+        </label>
+      )}
+
+      {registrosVisibles.length > 0 && registrosPorFecha.length === 0 && datePreset !== 'todos' && (
+        <div className="rounded-xl border border-warning/40 bg-warning/10 px-3 py-2.5 text-sm">
+          <p className="font-semibold text-warning">Hay {registrosVisibles.length} registros en el sistema</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Ninguno coincide con el período «
+            {datePreset === 'hoy'
+              ? 'Hoy'
+              : datePreset === '7d'
+                ? '7 días'
+                : datePreset === '15d'
+                  ? '15 días'
+                  : datePreset === '30d'
+                    ? '30 días'
+                    : 'personalizado'}
+            ». Probá <button type="button" className="underline font-bold" onClick={() => setDatePreset('todos')}>Todo</button>.
+          </p>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Período</p>
+        <div className="flex flex-wrap gap-1.5">
+          {(
+            [
+              ['hoy', 'Hoy'],
+              ['7d', '7 días'],
+              ['15d', '15 días'],
+              ['30d', '30 días'],
+              ['todos', 'Todo'],
+              ['custom', 'Personalizado'],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setDatePreset(id)}
+              className={`h-8 px-3 rounded-lg text-xs font-bold border transition-colors ${
+                datePreset === id
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'bg-card text-foreground border-border'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {datePreset === 'custom' && (
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[10px] text-muted-foreground font-medium">Desde</label>
+              <input
+                type="date"
+                value={customFrom}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                className="dash-select w-full mt-0.5"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] text-muted-foreground font-medium">Hasta</label>
+              <input
+                type="date"
+                value={customTo}
+                onChange={(e) => setCustomTo(e.target.value)}
+                className="dash-select w-full mt-0.5"
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="dash-filters grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+        <select
+          aria-label="Filtrar por región"
+          value={regionFilter}
+          onChange={(e) => {
+            setRegionFilter(e.target.value);
+            setDistritoFilter('todos');
+            setServicioFilter('todos');
+          }}
+          className="dash-select"
+        >
           <option value="todas">Todas las regiones</option>
-          {regionesDisponibles.map((r) => <option key={r} value={r}>{r}</option>)}
+          {regionesDisponibles.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
         </select>
-        <select aria-label="Filtrar por distrito" value={distritoFilter} onChange={(e) => setDistritoFilter(e.target.value)} className="dash-select">
+        <select
+          aria-label="Filtrar por distrito"
+          value={distritoFilter}
+          onChange={(e) => {
+            setDistritoFilter(e.target.value);
+            setServicioFilter('todos');
+          }}
+          className="dash-select"
+        >
           <option value="todos">Todos los distritos</option>
-          {distritosDisponibles.map((d) => <option key={d} value={d}>{d}</option>)}
+          {distritosDisponibles.map((d) => (
+            <option key={d} value={d}>
+              {d}
+            </option>
+          ))}
         </select>
-        <select aria-label="Tipo de gráfico" value={chartMode} onChange={(e) => setChartMode(e.target.value as 'stacked' | 'coverage')} className="dash-select">
+        <select
+          aria-label="Filtrar por servicio de salud"
+          value={servicioFilter}
+          onChange={(e) => setServicioFilter(e.target.value)}
+          className="dash-select"
+        >
+          <option value="todos">Todos los servicios</option>
+          {serviciosDisponibles.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+          <option value="_sin_servicio">Sin servicio indicado</option>
+        </select>
+        <select
+          aria-label="Tipo de gráfico"
+          value={chartMode}
+          onChange={(e) => setChartMode(e.target.value as 'stacked' | 'coverage')}
+          className="dash-select"
+        >
           <option value="stacked">Barras apiladas</option>
           <option value="coverage">Cobertura %</option>
         </select>
@@ -231,9 +398,16 @@ export default function DashboardView() {
       </div>
 
       {total === 0 ? (
-        <div className="dash-card text-center py-12 text-muted-foreground">
+        <div className="dash-card text-center py-12 text-muted-foreground space-y-2">
           <BarChart3 className="w-12 h-12 mx-auto mb-2 opacity-40" />
           <p className="font-semibold">Sin registros con estos filtros</p>
+          <p className="text-xs px-4">
+            {registrosVisibles.length === 0
+              ? isLoading
+                ? 'Cargando…'
+                : 'No hay datos en el servidor para tu usuario/ámbito. Si sos admin, activá «Ver todos los registros» o revisá tu asignación en perfil.'
+              : `Hay ${registrosVisibles.length} registros en el ámbito; ampliá el período o quitá filtros de región, distrito o servicio.`}
+          </p>
         </div>
       ) : (
         <Suspense fallback={<PageSkeleton rows={2} />}>

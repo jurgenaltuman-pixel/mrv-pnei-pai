@@ -55,9 +55,7 @@ export default function HousingCounter({
 
   const addSelected = () => {
     if (noTieneRegistro) {
-      const newContador = { efectivas: 0, noEfectivas: 0, fallidas: 0, renuentes: 0 };
-      newContador[keyByTipo[viviendaTipo]] = 1;
-      setContador(newContador);
+      update(keyByTipo[viviendaTipo], 1);
     } else if (viviendaTipo === 'efectiva') {
       update(keyByTipo[viviendaTipo], 1);
     } else {
@@ -115,7 +113,7 @@ export default function HousingCounter({
       </div>
 
       <p className="text-xs text-muted-foreground -mt-1 mb-3 leading-relaxed">
-        Por cada casa visitada: elegí el código y pulsá <strong>Añadir casa</strong>.
+        Por cada casa visitada: elegí el código y pulsá <strong>Añadir vivienda</strong>.
         {total > 0 && (
           <span className="block mt-1 font-semibold text-foreground">
             Esta visita: {total} casa{total !== 1 ? 's' : ''}
@@ -148,7 +146,7 @@ export default function HousingCounter({
                   {code}
                 </span>
                 <p className="text-[11px] font-bold leading-tight">{meta.titulo}</p>
-                <p className="text-[9px] text-muted-foreground">{meta.grupo === 'cerrada' ? 'Cerrada' : 'Abierta'}</p>
+                <p className="text-[9px] text-muted-foreground font-medium">{meta.subtitulo}</p>
               </button>
             );
           })}
@@ -162,7 +160,7 @@ export default function HousingCounter({
             onClick={addSelected}
             className="h-12 rounded-xl bg-primary text-primary-foreground text-sm font-bold flex items-center justify-center gap-1"
           >
-            <Plus className="w-5 h-5" /> Añadir casa
+            <Plus className="w-5 h-5" /> Añadir vivienda
           </button>
           <button
             type="button"

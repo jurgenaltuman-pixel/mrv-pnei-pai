@@ -1,7 +1,141 @@
-import { supabase } from '@/integrations/supabase/client';
+import { supabase, isSupabaseEnabled } from '@/integrations/supabase/client';
+import {
+  USE_MRV_API,
+  USE_SUPABASE_PADRON,
+  USE_SUPABASE_REGISTROS,
+  mrvApiFetch,
+  useRegistrosApi,
+} from '@/lib/api-config';
+import { guardarRegistroEnApi } from '@/lib/guardar-registro-api';
+import type { HistorialSprVisitaMrv } from '@/lib/padron-spr';
 import { SearchQuerySchema } from '@/lib/validation-schemas';
 import { mrvAppCache } from '@/services/mrvAppCache';
 import { mrvPadronIndexed } from '@/services/mrvPadronIndexed';
+import { parseHistorialSprDb, type HistorialSprCompleto } from '@/lib/padron-spr';
+import { resolveFechaNacimientoPersona } from '@/lib/persona-fecha';
+import { extractSexoFromPadronRow } from '@/lib/persona-sexo';
+import {
+  cleanNominaDisplayName,
+  cleanNominaUsername,
+  isRealUserEmail,
+  mapNominaApiRow,
+  normalizeNominaDocumento,
+} from '@/lib/nomina-profile';
+
+/** true = consultar padrón vía API Aiven; false = Supabase (padrón completo) */
+const usePadronApi = USE_MRV_API && !USE_SUPABASE_PADRON;
+
+function mapSupabaseVisitasSpr(rows: Record<string, unknown>[]): HistorialSprVisitaMrv[] {
+  return rows.map((r) => {
+    let estado = (r.estado_vacuna ?? r.estado_vacunacion) as string | undefined;
+    if (r.esquema_completo === true) estado = 'vacunado';
+    if (estado !== 'vacunado') estado = 'no_vacunado';
+    return {
+      id: r.id != null ? String(r.id) : undefined,
+      fecha_hora: String(r.fecha_hora ?? r.created_at ?? ''),
+      estado_vacuna: estado,
+      dosis_spr: (r.dosis_spr as string) ?? null,
+      fecha_dosis_spr: (r.fecha_dosis_spr as string) ?? null,
+      esquema_completo: (r.esquema_completo as boolean) ?? null,
+      tiene_cvs: (r.tiene_cvs as boolean) ?? null,
+      region: String(r.region ?? ''),
+      distrito: String(r.distrito ?? ''),
+      servicio: (r.servicio as string) ?? null,
+      motivo: (r.motivo as string) ?? null,
+      responsable: (r.responsable as string) ?? null,
+    };
+  });
+}
+
+async function fetchVisitasSprSupabase(documento: string): Promise<HistorialSprVisitaMrv[]> {
+  if (!isSupabaseEnabled) return [];
+  const { data, error } = await supabase
+    .from('registros_vacunacion')
+    .select(
+      'id, fecha_hora, created_at, estado_vacunacion, estado_vacuna, dosis_spr, fecha_dosis_spr, esquema_completo, tiene_cvs, region, distrito, servicio, motivo, responsable'
+    )
+    .eq('documento', documento)
+    .order('fecha_hora', { ascending: false })
+    .limit(30);
+  if (error || !data?.length) return [];
+  return mapSupabaseVisitasSpr(data as Record<string, unknown>[]);
+}
+
+function buildRegistroSupabasePayload(
+  registro: Omit<RegistroMRV, 'id' | 'fecha_hora'>,
+  estado: 'vacunado' | 'no_vacunado',
+  motivoCompuesto: string | null
+): Record<string, unknown> {
+  return {
+    user_id: registro.user_id,
+    region: registro.region,
+    distrito: registro.distrito,
+    servicio: registro.servicio || null,
+    barrio: registro.barrio || null,
+    responsable: registro.responsable || null,
+    nombre: registro.nombre,
+    documento: registro.documento,
+    fecha_nacimiento: registro.fecha_nacimiento,
+    edad: registro.edad ? parseInt(String(registro.edad), 10) : null,
+    sexo: registro.sexo,
+    libreta: registro.libreta,
+    estado_vacunacion: estado,
+    motivo: motivoCompuesto,
+    latitud: registro.latitud,
+    longitud: registro.longitud,
+    tipo_vivienda: normalizeTipoVivienda(registro.tipo_vivienda ?? null),
+    esquema_completo: registro.esquema_completo ?? null,
+    fuente_verificacion: registro.fuente_verificacion ?? null,
+    accion_tomada: registro.accion_tomada ?? null,
+    observaciones: registro.observaciones?.trim() || null,
+    fecha_dosis_spr: registro.fecha_dosis_spr || null,
+    dosis_spr: registro.dosis_spr ?? null,
+    estado_intervencion: registro.estado_intervencion ?? null,
+  };
+}
+
+async function insertRegistroSupabase(
+  registro: Omit<RegistroMRV, 'id' | 'fecha_hora'>,
+  estado: 'vacunado' | 'no_vacunado',
+  motivoCompuesto: string | null
+): Promise<boolean> {
+  if (!isSupabaseEnabled) {
+    console.error('guardarRegistro: Supabase no configurado (VITE_SUPABASE_URL / key)');
+    return false;
+  }
+  const payloadBase = buildRegistroSupabasePayload(registro, estado, motivoCompuesto);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let { error } = await supabase.from('registros_vacunacion').insert(payloadBase);
+    if (!error) return true;
+    const msg = String(error.message || '').toLowerCase();
+    if (msg.includes('column') || msg.includes('schema')) {
+      const fallback = { ...payloadBase };
+      delete fallback.fuente_verificacion;
+      delete fallback.accion_tomada;
+      delete fallback.observaciones;
+      delete fallback.fecha_dosis_spr;
+      delete fallback.dosis_spr;
+      delete fallback.estado_intervencion;
+      const retry = await supabase.from('registros_vacunacion').insert(fallback);
+      if (!retry.error) return true;
+      error = retry.error;
+    }
+    const retriable = /timeout|network|fetch|502|503|504/i.test(msg);
+    if (!retriable || attempt === 2) {
+      console.error('Error guardando registro en Supabase:', error);
+      return false;
+    }
+    await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+  }
+  return false;
+}
+
+/** Normaliza una fila cruda del API de padrón a PersonaBase. */
+export function mapPadronApiPersona(raw: unknown): PersonaBase | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const rows = asPersonaRows([raw]);
+  return rows[0] ?? null;
+}
 
 function asPersonaRows(raw: unknown): PersonaBase[] {
   if (!Array.isArray(raw)) return [];
@@ -15,13 +149,23 @@ function asPersonaRows(raw: unknown): PersonaBase[] {
       nombre: o.nombre,
       tipo_documento: String(o.tipo_documento ?? ''),
       documento: o.documento,
-      fecha_nacimiento: (o.fecha_nacimiento as string | null) ?? null,
-      sexo: (o.sexo as string | null) ?? null,
+      fecha_nacimiento: resolveFechaNacimientoPersona({
+        fecha_nacimiento: (o.fecha_nacimiento as string | null) ?? null,
+        edad_anos: o.edad_anos != null && o.edad_anos !== '' ? Number(o.edad_anos) : null,
+        edad_meses: o.edad_meses != null && o.edad_meses !== '' ? Number(o.edad_meses) : null,
+        historial_spr: parseHistorialSprDb(o.historial_spr),
+      }) || null,
+      sexo: extractSexoFromPadronRow(o) || null,
       region_sanitaria: (o.region_sanitaria as string | null) ?? null,
       distrito: (o.distrito as string | null) ?? null,
       servicio_salud: (o.servicio_salud as string | null) ?? null,
       documento_madre: (o.documento_madre as string | null) ?? null,
       nombre_madre: (o.nombre_madre as string | null) ?? null,
+      edad_anos:
+        o.edad_anos != null && o.edad_anos !== '' ? Number(o.edad_anos) : null,
+      edad_meses:
+        o.edad_meses != null && o.edad_meses !== '' ? Number(o.edad_meses) : null,
+      historial_spr: parseHistorialSprDb(o.historial_spr),
     });
   }
   return out;
@@ -52,6 +196,9 @@ export interface PersonaBase {
   servicio_salud: string | null;
   documento_madre: string | null;
   nombre_madre: string | null;
+  edad_anos?: number | null;
+  edad_meses?: number | null;
+  historial_spr?: import('@/lib/padron-spr').PadronSprHistorialPadron | null;
 }
 
 export interface RegistroMRV {
@@ -82,6 +229,7 @@ export interface RegistroMRV {
   dosis_spr?: string | null;
   estado_intervencion?: string | null;
   tiene_cvs?: boolean | null;
+  tipo_documento?: string | null;
 }
 
 export interface BusquedaAvanzadaFiltros {
@@ -184,7 +332,7 @@ export function nombreCoincidePartes(nombreCompleto: string, partesNormalizadas:
   for (const p of partesNormalizadas) {
     if (!p) continue;
     if (p.length >= 2) {
-      const ok = words.some((w) => w.startsWith(p)) || hay.includes(p);
+      const ok = words.some((w) => w.startsWith(p));
       if (!ok) return false;
     } else {
       if (!words.some((w) => w.startsWith(p))) return false;
@@ -243,8 +391,59 @@ export const dataService = {
       const needleTokens = rawTokens.map((t) => normalizeText(t)).filter(Boolean);
       const isNumeric = /^\d+$/.test(normalized);
 
+      if (isNumeric && normalized.length >= 4) {
+        try {
+          if (usePadronApi) {
+            const { data: apiRes } = await mrvApiFetch<{ data: PersonaBase[] }>(
+              `/api/padron/documento?doc=${encodeURIComponent(normalized)}&limit=${maxResults}`
+            );
+            if (apiRes?.data?.length) {
+              const out = asPersonaRows(apiRes.data).slice(0, maxResults);
+              persistPersonasCache(pCacheKey, out);
+              return out;
+            }
+          }
+          let docReq = supabase.rpc('buscar_padron_documento', {
+            p_documento: normalized,
+            p_limit: maxResults,
+          });
+          if (signal) docReq = docReq.abortSignal(signal);
+          const { data: docRows, error: docErr } = await docReq;
+          if (!docErr && Array.isArray(docRows) && docRows.length > 0) {
+            const mapped = asPersonaRows(docRows);
+            const out = mapped.slice(0, maxResults);
+            persistPersonasCache(pCacheKey, out);
+            return out;
+          }
+        } catch {
+          /* fallback abajo */
+        }
+      }
+
       if (!isNumeric && rawTokens.length === 1 && normalized.length >= 3) {
         try {
+          if (usePadronApi) {
+            const { data: apiRes } = await mrvApiFetch<{ data: { documento: string; nombre: string; fecha_nacimiento: string | null }[] }>(
+              `/api/padron/search?term=${encodeURIComponent(normalized)}`
+            );
+            if (apiRes?.data?.length) {
+              const mapped: PersonaBase[] = apiRes.data.map((row) => ({
+                documento: String(row.documento ?? ''),
+                nombre: String(row.nombre ?? ''),
+                fecha_nacimiento: row.fecha_nacimiento ?? null,
+                tipo_documento: 'CI',
+                sexo: null,
+                region_sanitaria: null,
+                distrito: null,
+                servicio_salud: null,
+                documento_madre: null,
+                nombre_madre: null,
+              }));
+              const sliced = mapped.slice(0, maxResults);
+              persistPersonasCache(pCacheKey, sliced);
+              return sliced;
+            }
+          }
           let rpcReq = supabase.rpc('search_personas_mejorada', { search_term: normalized });
           if (signal) rpcReq = rpcReq.abortSignal(signal);
           const { data: rpcRows, error: rpcErr } = await rpcReq;
@@ -274,15 +473,58 @@ export const dataService = {
         }
       }
 
+      if (usePadronApi) {
+        if (isNumeric) {
+          const { data: apiRes } = await mrvApiFetch<{ data: PersonaBase[] }>(
+            `/api/padron/documento?doc=${encodeURIComponent(normalized)}&limit=${maxResults}`
+          );
+          if (apiRes?.data?.length) {
+            const out = asPersonaRows(apiRes.data).slice(0, maxResults);
+            persistPersonasCache(pCacheKey, out);
+            return out;
+          }
+        } else if (rawTokens.length > 0) {
+          const escapedAll = rawTokens.map((t) => escapeILike(t)).filter(Boolean);
+          const longTokens = escapedAll.filter((t) => t.length >= 2);
+          const tokensForServer = (longTokens.length > 0 ? longTokens : escapedAll).slice(0, 6);
+          if (tokensForServer.length > 0) {
+            const { data: apiRes } = await mrvApiFetch<{ data: PersonaBase[] }>('/api/padron/query', {
+              method: 'POST',
+              body: JSON.stringify({ normalized, isNumeric, tokens: tokensForServer, limit: fetchCap }),
+            });
+            if (apiRes?.data?.length) {
+              let results = asPersonaRows(apiRes.data);
+              if (needleTokens.length > 0) {
+                results = results.filter((row) => {
+                  const hay = normalizeText(row.nombre);
+                  return needleTokens.every((nt) => nt.length > 0 && hay.includes(nt));
+                });
+              }
+              const out = results.slice(0, maxResults);
+              persistPersonasCache(pCacheKey, out);
+              return out;
+            }
+          }
+        }
+        const cached = await loadCachedPersonas(pCacheKey);
+        if (cached.length) return cached;
+        if (await mrvPadronIndexed.isReady()) {
+          return (await mrvPadronIndexed.searchGeneral(normalized, {
+            maxResults,
+            isNumeric,
+            needleTokens,
+            normalize: normalizeText,
+          })) as PersonaBase[];
+        }
+        return cached;
+      }
+
       let queryBuilder = supabase
         .from('base_personas')
         .select('id, nombre, tipo_documento, documento, fecha_nacimiento, sexo, region_sanitaria, distrito, servicio_salud, documento_madre, nombre_madre');
 
       if (isNumeric) {
-        const safe = escapeILike(normalized);
-        queryBuilder = queryBuilder.or(
-          `documento.eq.${normalized},documento.ilike.${safe}%,documento.ilike.%${safe}%`
-        );
+        queryBuilder = queryBuilder.eq('documento', normalized);
       } else {
         if (rawTokens.length === 0) {
           return [];
@@ -396,6 +638,33 @@ export const dataService = {
   /**
    * Búsqueda por documento (número + tipo opcional en base_personas).
    */
+  async getHistorialSpr(documento: string, tipoDocumento = 'CI'): Promise<HistorialSprCompleto | null> {
+    const doc = documento.replace(/\D/g, '').trim() || documento.trim();
+    if (!doc || doc.length < 4) return null;
+
+    if (usePadronApi) {
+      const { data, error } = await mrvApiFetch<{ data: HistorialSprCompleto }>(
+        `/api/padron/historial-spr?doc=${encodeURIComponent(doc)}&tipo=${encodeURIComponent(tipoDocumento)}`
+      );
+      if (error && !USE_SUPABASE_REGISTROS) return null;
+      const base = data?.data ?? { documento: doc, padron: null, visitas_mrv: [] };
+      if (USE_SUPABASE_REGISTROS) {
+        const visitasSb = await fetchVisitasSprSupabase(doc);
+        const merged = [...visitasSb, ...(base.visitas_mrv || [])];
+        const seen = new Set<string>();
+        base.visitas_mrv = merged.filter((v) => {
+          const k = `${v.fecha_hora}|${v.estado_vacuna}|${v.motivo ?? ''}`;
+          if (seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        });
+      }
+      return base;
+    }
+
+    return null;
+  },
+
   async buscarPersonasPorDocumento(
     documentoRaw: string,
     tipoDocumento = 'CI',
@@ -418,6 +687,64 @@ export const dataService = {
       return await loadCachedPersonas(cacheKey);
     }
     try {
+      if (usePadronApi) {
+        const { data: apiRes } = await mrvApiFetch<{ data: PersonaBase | null }>(
+          `/api/padron/by-documento?doc=${encodeURIComponent(doc)}&tipo=${encodeURIComponent(tipo)}`
+        );
+        if (apiRes?.data) {
+          const rows = asPersonaRows([apiRes.data]);
+          if (rows.length) {
+            persistPersonasCache(cacheKey, rows);
+            return rows;
+          }
+        }
+        if (/[A-Za-z]/.test(doc)) {
+          const { data: sinTipo } = await mrvApiFetch<{ data: PersonaBase | null }>(
+            `/api/padron/by-documento?doc=${encodeURIComponent(doc)}&tipo=`
+          );
+          if (sinTipo?.data) {
+            const rows = asPersonaRows([sinTipo.data]);
+            if (rows.length) {
+              persistPersonasCache(cacheKey, rows);
+              return rows;
+            }
+          }
+        }
+        const { data: docRes } = await mrvApiFetch<{ data: PersonaBase[] }>(
+          `/api/padron/documento?doc=${encodeURIComponent(doc)}&limit=${limit}`
+        );
+        if (docRes?.data?.length) {
+          let mapped = asPersonaRows(docRes.data);
+          if (tipo) {
+            const t = tipo.toUpperCase();
+            const filtered = mapped.filter((r) => (r.tipo_documento || 'CI').toUpperCase() === t);
+            if (filtered.length) mapped = filtered;
+          }
+          if (mapped.length) {
+            persistPersonasCache(cacheKey, mapped);
+            return mapped;
+          }
+        }
+      } else {
+      try {
+        let rpcReq = supabase.rpc('buscar_padron_documento', { p_documento: doc, p_limit: limit });
+        if (opts?.signal) rpcReq = rpcReq.abortSignal(opts.signal);
+        const { data: rpcRows, error: rpcErr } = await rpcReq;
+        if (!rpcErr && Array.isArray(rpcRows) && rpcRows.length > 0) {
+          let mapped = asPersonaRows(rpcRows);
+          if (tipo) {
+            const t = tipo.toUpperCase();
+            mapped = mapped.filter((r) => (r.tipo_documento || 'CI').toUpperCase() === t);
+          }
+          if (mapped.length > 0) {
+            persistPersonasCache(cacheKey, mapped);
+            return mapped;
+          }
+        }
+      } catch {
+        /* consulta directa */
+      }
+
       let q = supabase
         .from('base_personas')
         .select('id, nombre, tipo_documento, documento, fecha_nacimiento, sexo, region_sanitaria, distrito, servicio_salud, documento_madre, nombre_madre')
@@ -432,6 +759,7 @@ export const dataService = {
         const rows = data as PersonaBase[];
         persistPersonasCache(cacheKey, rows);
         return rows;
+      }
       }
       if (await mrvPadronIndexed.isReady()) {
         const local = await mrvPadronIndexed.searchByDocument(doc, tipo, limit);
@@ -451,6 +779,85 @@ export const dataService = {
       persistPersonasCache(cacheKey, fallback);
       return fallback;
     }
+  },
+
+  /**
+   * Búsqueda de brigadistas en nómina (profiles) para registro — endpoint público, sin login.
+   */
+  async buscarNominaBrigadista(
+    query: string,
+    options?: { limit?: number; signal?: AbortSignal }
+  ): Promise<
+    {
+      documento: string;
+      nombre: string;
+      username?: string;
+      email?: string | null;
+      fecha_nacimiento: string | null;
+      assigned_region?: string | null;
+      assigned_distrito?: string | null;
+      assigned_servicio?: string | null;
+    }[]
+  > {
+    const trimmed = (query || '').trim();
+    const digits = normalizeNominaDocumento(trimmed);
+    const hasLetter = /[A-Za-zÁÉÍÓÚáéíóúÑñ]/.test(trimmed);
+    if (!hasLetter && digits.length < 5) return [];
+    if (hasLetter && trimmed.length < 4 && !trimmed.includes(' ')) return [];
+    const limit = Math.min(20, options?.limit ?? 12);
+    if (USE_MRV_API) {
+      const base = import.meta.env.VITE_MRV_API_URL ?? '';
+      const url = `${String(base).replace(/\/$/, '')}/api/public/nomina-search?q=${encodeURIComponent(trimmed)}`;
+      const res = await fetch(url, { signal: options?.signal });
+      const body = (await res.json().catch(() => ({}))) as { data?: unknown[]; error?: string };
+      if (!res.ok) {
+        console.error('nomina-search:', body.error || res.status);
+        return [];
+      }
+      if (!Array.isArray(body.data)) return [];
+      return body.data
+        .slice(0, limit)
+        .map((row) => {
+          const mapped = mapNominaApiRow(row as Record<string, unknown>);
+          const o = row as Record<string, unknown>;
+          if (o.nomina_documento) {
+            mapped.documento = normalizeNominaDocumento(String(o.nomina_documento));
+          }
+          return mapped;
+        })
+        .filter((r) => r.documento.length >= 4 && r.nombre.length >= 2);
+    }
+    if (!isSupabaseEnabled) return [];
+    const docDigits = trimmed.replace(/\D/g, '');
+    const hasLetterSb = /[A-Za-zÁÉÍÓÚáéíóúÑñ]/.test(trimmed);
+    let req = supabase
+      .from('profiles')
+      .select('username, display_name, email, assigned_region, assigned_distrito, assigned_servicio')
+      .eq('is_active', true)
+      .limit(limit);
+    if (!hasLetterSb && docDigits.length >= 5) {
+      req = req.ilike('username', `${docDigits}%`);
+    } else {
+      req = req.or(`display_name.ilike.%${trimmed}%,username.ilike.%${trimmed}%`);
+    }
+    if (options?.signal) req = req.abortSignal(options.signal);
+    const { data, error } = await req;
+    if (error || !data?.length) return [];
+    return data
+      .map((p) => {
+        const documento = normalizeNominaDocumento(String(p.username || '')) || String(p.username || '');
+        return {
+          documento,
+          nombre: cleanNominaDisplayName(p.display_name, p.username),
+          username: cleanNominaUsername(p.username, documento),
+          email: isRealUserEmail((p as { email?: string }).email) ? (p as { email?: string }).email! : null,
+          fecha_nacimiento: null,
+          assigned_region: p.assigned_region,
+          assigned_distrito: p.assigned_distrito,
+          assigned_servicio: p.assigned_servicio,
+        };
+      })
+      .filter((r) => r.documento.length >= 4 || r.nombre.length >= 2);
   },
 
   /**
@@ -488,6 +895,10 @@ export const dataService = {
     const fecha = filtros.fechaNacimiento?.trim();
     const sexo = filtros.sexo?.trim().toUpperCase();
     const pKey = personalSearchCacheKey(filtros);
+    const parts = [filtros.nombre1, filtros.nombre2, filtros.apellido1, filtros.apellido2]
+      .map((s) => normalizeText(s))
+      .filter((s) => s.length >= 2);
+
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       if (await mrvPadronIndexed.isReady()) {
         const local = await mrvPadronIndexed.searchDatosPersonales(filtros, nombreCoincidePartes, normalizeText, limit);
@@ -496,32 +907,37 @@ export const dataService = {
       return await loadCachedPersonas(pKey);
     }
 
-    const parts = [filtros.nombre1, filtros.nombre2, filtros.apellido1, filtros.apellido2]
-      .map((s) => normalizeText(s))
-      .filter((s) => s.length >= 1);
-    const hasServerFilter =
-      (madre && madre.length >= 4) || Boolean(fecha) || sexo === 'M' || sexo === 'F';
-
-    if (parts.length > 0 && !hasServerFilter) {
-      const q = [filtros.nombre1, filtros.nombre2, filtros.apellido1, filtros.apellido2]
-        .map((s) => (s || '').trim())
-        .filter(Boolean)
-        .join(' ');
-      if (q.length < 1) return [];
-      const broad = await this.getBasePersonas(q, { limit: 80 });
-      const out = broad.filter((row) => nombreCoincidePartes(row.nombre, parts)).slice(0, limit);
-      persistPersonasCache(pKey, out);
-      return out;
-    }
-
-    if (!hasServerFilter && parts.length === 0) return [];
-
     try {
+      if (usePadronApi) {
+        const { data: apiRes } = await mrvApiFetch<{ data: PersonaBase[] }>('/api/padron/datos-personales', {
+          method: 'POST',
+          body: JSON.stringify({
+            nombre1: filtros.nombre1,
+            nombre2: filtros.nombre2,
+            apellido1: filtros.apellido1,
+            apellido2: filtros.apellido2,
+            documentoMadrePadre: madre,
+            fechaNacimiento: fecha,
+            sexo,
+            limit,
+          }),
+        });
+        let rows = asPersonaRows(apiRes?.data);
+        if (parts.length > 0) {
+          rows = rows.filter((row) => nombreCoincidePartes(row.nombre, parts));
+        }
+        const out = dedupePersonasPorDocumento(rows).slice(0, limit);
+        persistPersonasCache(pKey, out);
+        return out;
+      }
+
+      if (!isSupabaseEnabled) return [];
+
       let q = supabase
         .from('base_personas')
         .select('id, nombre, tipo_documento, documento, fecha_nacimiento, sexo, region_sanitaria, distrito, servicio_salud, documento_madre, nombre_madre');
 
-      if (madre && madre.length >= 4) {
+      if (madre && madre.length >= 6) {
         q = q.eq('documento_madre', madre);
       }
       if (fecha) {
@@ -530,8 +946,11 @@ export const dataService = {
       if (sexo === 'M' || sexo === 'F') {
         q = q.eq('sexo', sexo);
       }
+      if (parts.length > 0 && !madre && !fecha) {
+        q = q.ilike('nombre', `%${parts[0]}%`);
+      }
 
-      const { data, error } = await q.limit(120);
+      const { data, error } = await q.limit(parts.length > 0 && !madre && !fecha ? 500 : 200);
       if (error || !data?.length) {
         return await loadCachedPersonas(pKey);
       }
@@ -541,15 +960,7 @@ export const dataService = {
         results = results.filter((row) => nombreCoincidePartes(row.nombre, parts));
       }
 
-      const seen = new Set<string>();
-      const out = results
-        .filter((r) => {
-          const k = r.documento || '';
-          if (!k || seen.has(k)) return false;
-          seen.add(k);
-          return true;
-        })
-        .slice(0, limit);
+      const out = dedupePersonasPorDocumento(results).slice(0, limit);
       persistPersonasCache(pKey, out);
       return out;
     } catch (err) {
@@ -609,63 +1020,146 @@ export const dataService = {
     }
   },
 
-  async guardarRegistro(registro: Omit<RegistroMRV, 'id' | 'fecha_hora'>): Promise<boolean> {
-    // Normalización estricta: solo 'vacunado' o 'no_vacunado' como string
+  async crearPersonaEnPadron(payload: {
+    nombre: string;
+    documento: string;
+    tipo_documento?: string;
+    fecha_nacimiento?: string | null;
+    sexo?: string | null;
+    region_sanitaria?: string | null;
+    distrito?: string | null;
+    servicio_salud?: string | null;
+    documento_madre?: string | null;
+    nombre_madre?: string | null;
+  }): Promise<{ persona: PersonaBase | null; error?: string }> {
+    if (usePadronApi) {
+      const { data, error, status } = await mrvApiFetch<{ data: Record<string, unknown> }>(
+        '/api/padron/persona',
+        {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        }
+      );
+      if (error) return { persona: null, error: status === 409 ? error : error };
+      const persona = mapPadronApiPersona(data?.data ?? null);
+      return { persona };
+    }
+    if (!isSupabaseEnabled) {
+      return { persona: null, error: 'Padrón no disponible sin conexión a la base.' };
+    }
+    const { data, error } = await supabase
+      .from('base_personas')
+      .insert({
+        nombre: payload.nombre,
+        tipo_documento: payload.tipo_documento || 'CI',
+        documento: payload.documento,
+        fecha_nacimiento: payload.fecha_nacimiento || null,
+        sexo: payload.sexo || null,
+        region_sanitaria: payload.region_sanitaria || null,
+        distrito: payload.distrito || null,
+        servicio_salud: payload.servicio_salud || null,
+        documento_madre: payload.documento_madre || null,
+        nombre_madre: payload.nombre_madre || null,
+      })
+      .select()
+      .single();
+    if (error) return { persona: null, error: error.message };
+    return { persona: mapPadronApiPersona(data) };
+  },
+
+  async guardarRegistro(
+    registro: Omit<RegistroMRV, 'id' | 'fecha_hora'>
+  ): Promise<{ ok: boolean; id?: string; error?: string }> {
     let estado = registro.estado_vacuna;
     if (typeof estado !== 'string' || (estado !== 'vacunado' && estado !== 'no_vacunado')) {
       console.warn('⚠️ Valor de estado_vacuna inválido al guardar:', estado, '-> Se fuerza a "no_vacunado"');
       estado = 'no_vacunado';
     }
     const motivoCompuesto = composeMotivoDetalle(registro);
-    const payloadBase: Record<string, unknown> = {
-      user_id: registro.user_id,
-      region: registro.region,
-      distrito: registro.distrito,
-      servicio: registro.servicio || null,
-      barrio: registro.barrio || null,
-      responsable: registro.responsable || null,
-      nombre: registro.nombre,
-      documento: registro.documento,
-      fecha_nacimiento: registro.fecha_nacimiento,
-      edad: registro.edad ? parseInt(String(registro.edad), 10) : null,
-      sexo: registro.sexo,
-      libreta: registro.libreta,
-      estado_vacunacion: estado,
-      motivo: motivoCompuesto,
-      latitud: registro.latitud,
-      longitud: registro.longitud,
-      tipo_vivienda: normalizeTipoVivienda(registro.tipo_vivienda ?? null),
-      esquema_completo: registro.esquema_completo ?? null,
-      fuente_verificacion: registro.fuente_verificacion ?? null,
-      accion_tomada: registro.accion_tomada ?? null,
-      observaciones: registro.observaciones?.trim() || null,
-      fecha_dosis_spr: registro.fecha_dosis_spr || null,
-      dosis_spr: registro.dosis_spr ?? null,
-      estado_intervencion: registro.estado_intervencion ?? null,
-    };
-
-    let { error } = await supabase.from('registros_vacunacion').insert(payloadBase);
-    if (!error) return true;
-
-    const msg = String(error.message || '').toLowerCase();
-    if (msg.includes('column') || msg.includes('schema')) {
-      const fallback = { ...payloadBase };
-      delete fallback.fuente_verificacion;
-      delete fallback.accion_tomada;
-      delete fallback.observaciones;
-      delete fallback.fecha_dosis_spr;
-      delete fallback.dosis_spr;
-      delete fallback.estado_intervencion;
-      const retry = await supabase.from('registros_vacunacion').insert(fallback);
-      if (!retry.error) return true;
-      console.error('Error guardando registro (fallback):', retry.error);
-      return false;
+    if (useRegistrosApi()) {
+      const saved = await guardarRegistroEnApi({
+        region: registro.region,
+        distrito: registro.distrito,
+        servicio: registro.servicio || null,
+        barrio: registro.barrio || null,
+        responsable: registro.responsable || null,
+        nombre: registro.nombre,
+        documento: registro.documento,
+        fecha_nacimiento: registro.fecha_nacimiento,
+        edad: registro.edad || null,
+        sexo: registro.sexo,
+        libreta: registro.libreta ?? false,
+        estado_vacuna: estado,
+        motivo: motivoCompuesto,
+        latitud: registro.latitud,
+        longitud: registro.longitud,
+        tipo_vivienda: normalizeTipoVivienda(registro.tipo_vivienda ?? null),
+        esquema_completo: registro.esquema_completo ?? null,
+        fuente_verificacion: registro.fuente_verificacion ?? null,
+        accion_tomada: registro.accion_tomada ?? null,
+        observaciones: registro.observaciones?.trim() || null,
+        fecha_dosis_spr: registro.fecha_dosis_spr || null,
+        dosis_spr: registro.dosis_spr ?? null,
+        estado_intervencion: registro.estado_intervencion ?? null,
+        tiene_cvs: registro.tiene_cvs ?? null,
+        tipo_documento: (registro as { tipo_documento?: string }).tipo_documento ?? null,
+      });
+      if (!saved.ok || !saved.id) {
+        console.error('guardarRegistro API:', saved.error);
+        return { ok: false, error: saved.error || 'No se confirmó el guardado en Aiven' };
+      }
+      const fecha_hora = new Date().toISOString();
+      void mrvAppCache.prependRegistro({
+        ...registro,
+        estado_vacuna: estado,
+        motivo: motivoCompuesto,
+        id: saved.id,
+        fecha_hora,
+      });
+      return { ok: true, id: saved.id };
     }
-    console.error('Error guardando registro:', error);
-    return false;
+    const ok = await insertRegistroSupabase(registro, estado, motivoCompuesto);
+    if (!ok) {
+      return {
+        ok: false,
+        error: 'No se pudo guardar en Supabase. Revisá la sesión o la conexión.',
+      };
+    }
+    return { ok: true };
   },
 
   async getDashboard(): Promise<DashboardData> {
+    if (useRegistrosApi()) {
+      const { data: apiRes } = await mrvApiFetch<{ data: Record<string, unknown>[] }>('/api/registros?limit=5000');
+      const data = apiRes?.data || [];
+      let totalVacunados = 0;
+      let totalNoVacunados = 0;
+      const porDistrito: Record<string, { vacunados: number; noVacunados: number }> = {};
+      const viviendas: DashboardData['viviendas'] = {
+        efectiva: 0,
+        revisitada: 0,
+        sin_adulto_responsable: 0,
+        renuente: 0,
+        sin_dato: 0,
+      };
+      const esquema = { completo: 0, incompleto: 0 };
+      for (const r of data) {
+        const ev = (r.estado_vacuna ?? r.estado_vacunacion) as string;
+        if (ev === 'vacunado') totalVacunados++;
+        else totalNoVacunados++;
+        const distrito = String(r.distrito || 'Sin distrito');
+        if (!porDistrito[distrito]) porDistrito[distrito] = { vacunados: 0, noVacunados: 0 };
+        if (ev === 'vacunado') porDistrito[distrito].vacunados++;
+        else porDistrito[distrito].noVacunados++;
+        const tipo = normalizeTipoVivienda((r.tipo_vivienda as string) ?? null);
+        if (tipo) viviendas[tipo]++;
+        else viviendas.sin_dato++;
+        if (r.esquema_completo === true) esquema.completo++;
+        else esquema.incompleto++;
+      }
+      return { totalVacunados, totalNoVacunados, porDistrito, viviendas, esquema };
+    }
+
     let hasTipoVivienda = true;
     let hasEsquemaCompleto = true;
     let { data, error } = await supabase
@@ -756,12 +1250,12 @@ export const dataService = {
     return { totalVacunados, totalNoVacunados, porDistrito, viviendas, esquema };
   },
 
-  async getRegistros(limit = 3000): Promise<RegistroMRV[]> {
+  async getRegistros(limit = 3000, opts?: { national?: boolean }): Promise<RegistroMRV[]> {
     const lim = Math.max(100, Math.min(limit, 10000));
 
     const mapRows = (rows: any[]): RegistroMRV[] =>
       (rows || []).map((row) => {
-        let estado = row.estado_vacunacion;
+        let estado = row.estado_vacuna ?? row.estado_vacunacion;
         if (row.esquema_completo === true) {
           estado = 'vacunado';
         }
@@ -789,6 +1283,14 @@ export const dataService = {
           longitud: row.longitud ?? null,
           tipo_vivienda: normalizeTipoVivienda(row.tipo_vivienda ?? null),
           esquema_completo: row.esquema_completo ?? null,
+          fuente_verificacion: row.fuente_verificacion ?? null,
+          accion_tomada: row.accion_tomada ?? null,
+          observaciones: row.observaciones ?? null,
+          fecha_dosis_spr: row.fecha_dosis_spr ?? null,
+          dosis_spr: row.dosis_spr ?? null,
+          estado_intervencion: row.estado_intervencion ?? null,
+          tiene_cvs: row.tiene_cvs ?? null,
+          tipo_documento: row.tipo_documento ?? null,
         };
       }) as RegistroMRV[];
 
@@ -802,6 +1304,26 @@ export const dataService = {
     }
 
     try {
+      if (useRegistrosApi()) {
+        const path = opts?.national
+          ? `/api/admin/registros?limit=${lim}&national=1`
+          : `/api/registros?limit=${lim}`;
+        const { data: apiRes, error } = await mrvApiFetch<{ data: Record<string, unknown>[] }>(path);
+        if (error) return await loadSnapshot();
+        const mapped = mapRows(apiRes?.data || []);
+        const cached = await loadSnapshot();
+        if (mapped.length === 0 && cached.length > 0) return cached;
+        if (cached.length > 0) {
+          const ids = new Set(mapped.map((r) => r.id).filter(Boolean));
+          const extra = cached.filter((r) => r.id && !ids.has(r.id));
+          const merged = extra.length > 0 ? [...mapped, ...extra] : mapped;
+          void mrvAppCache.saveRegistrosSnapshot(merged);
+          return merged;
+        }
+        if (mapped.length > 0) void mrvAppCache.saveRegistrosSnapshot(mapped);
+        return mapped;
+      }
+
       const { data, error } = await supabase
         .from('registros_vacunacion')
         .select('*')
@@ -850,6 +1372,13 @@ export const dataService = {
   },
 
   async addPersonaBase(persona: PersonaBase): Promise<boolean> {
+    if (USE_MRV_API) {
+      const { error } = await mrvApiFetch('/api/admin/padron/batch', {
+        method: 'POST',
+        body: JSON.stringify({ rows: [persona] }),
+      });
+      return !error;
+    }
     const { error } = await supabase
       .from('base_personas')
       .insert({

@@ -1,79 +1,50 @@
 import { describe, it, expect } from 'vitest';
-import { isMrvCvsTerrenoCompleto } from '@/lib/mrv-cvs-flow';
+import { isMrvTerrenoCompleto } from '@/lib/mrv-cvs-flow';
 
 const base = {
   fuenteVerificacion: 'libreta',
-  libreta: true as boolean | null,
-  tieneCvs: null as boolean | null,
+  estadoVacuna: null as 'vacunado' | 'no_vacunado' | null,
+  dosisMonitoreo: null as '1' | '2plus' | null,
   rechazoVacunacion: false,
   motivo: '',
   accionTomada: '',
-  dosisSpr: null as string | null,
-  fechaSpr: '',
 };
 
-describe('isMrvCvsTerrenoCompleto', () => {
-  it('rechaza si falta tieneCvs', () => {
-    expect(isMrvCvsTerrenoCompleto({ ...base, tieneCvs: null })).toBe(false);
+describe('isMrvTerrenoCompleto', () => {
+  it('exige fuente y estado', () => {
+    expect(isMrvTerrenoCompleto({ ...base, fuenteVerificacion: '' })).toBe(false);
+    expect(isMrvTerrenoCompleto({ ...base, estadoVacuna: null })).toBe(false);
   });
 
-  it('con NO tiene CVS: no exige dosis/fecha; exige motivo o rechazo y acción', () => {
+  it('vacunado exige dosis (esquema automático)', () => {
     expect(
-      isMrvCvsTerrenoCompleto({
+      isMrvTerrenoCompleto({
         ...base,
-        tieneCvs: false,
-        motivo: 'Ausente',
-        accionTomada: 'derivado_salud',
-        dosisSpr: null,
-        fechaSpr: '',
+        estadoVacuna: 'vacunado',
+        dosisMonitoreo: null,
+      })
+    ).toBe(false);
+    expect(
+      isMrvTerrenoCompleto({
+        ...base,
+        estadoVacuna: 'vacunado',
+        dosisMonitoreo: '2plus',
       })
     ).toBe(true);
+  });
 
+  it('no vacunado exige motivo, acción o rechazo', () => {
     expect(
-      isMrvCvsTerrenoCompleto({
+      isMrvTerrenoCompleto({
         ...base,
-        tieneCvs: false,
-        motivo: '',
+        estadoVacuna: 'no_vacunado',
+      })
+    ).toBe(false);
+    expect(
+      isMrvTerrenoCompleto({
+        ...base,
+        estadoVacuna: 'no_vacunado',
         rechazoVacunacion: true,
-        accionTomada: 'rechazo_definitivo',
-      })
-    ).toBe(true);
-
-    expect(
-      isMrvCvsTerrenoCompleto({
-        ...base,
-        tieneCvs: false,
-        motivo: 'x',
-        accionTomada: '',
-      })
-    ).toBe(false);
-  });
-
-  it('con SÍ tiene CVS: exige tipo de dosis y fecha', () => {
-    expect(
-      isMrvCvsTerrenoCompleto({
-        ...base,
-        tieneCvs: true,
-        dosisSpr: 'primera',
-        fechaSpr: '',
-      })
-    ).toBe(false);
-
-    expect(
-      isMrvCvsTerrenoCompleto({
-        ...base,
-        tieneCvs: true,
-        dosisSpr: null,
-        fechaSpr: '2026-03-15',
-      })
-    ).toBe(false);
-
-    expect(
-      isMrvCvsTerrenoCompleto({
-        ...base,
-        tieneCvs: true,
-        dosisSpr: 'primera',
-        fechaSpr: '2026-03-15',
       })
     ).toBe(true);
   });

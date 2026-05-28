@@ -129,7 +129,7 @@ export const offlineCache = {
       const promises = batch.map(async (item) => {
         try {
           const registro = toRegistroMRV(item.data);
-          const ok = await dataService.guardarRegistro(registro);
+          const { ok } = await dataService.guardarRegistro(registro);
           if (!ok) throw new Error('insert_rejected');
 
           await this.removePending(item.id);

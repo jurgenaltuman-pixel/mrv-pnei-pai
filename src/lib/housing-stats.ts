@@ -1,12 +1,12 @@
 import type { ContadorViviendas } from '@/types/mrv';
 
-/** Tipos de vivienda según protocolo MRV en terreno */
+/** Tipos de vivienda — etiquetas oficiales del informe MRV / dashboard */
 export const TIPOS_VIVIENDA = [
   {
     code: 'E' as const,
     key: 'efectivas' as keyof ContadorViviendas,
     titulo: 'Efectiva',
-    subtitulo: 'Se encuestó al niño/a',
+    subtitulo: 'Abierta',
     descripcion: 'La brigada entró y registró datos del niño elegible (o rechazo con datos).',
     grupo: 'abierta' as const,
     colorClass: 'bg-success text-success-foreground',
@@ -16,8 +16,8 @@ export const TIPOS_VIVIENDA = [
   {
     code: 'N' as const,
     key: 'noEfectivas' as keyof ContadorViviendas,
-    titulo: 'Cerrada / sin niño',
-    subtitulo: 'No efectiva',
+    titulo: 'No efectiva',
+    subtitulo: 'Abierta',
     descripcion: 'Puerta cerrada, no hay niños elegibles o no se pudo abordar la vivienda.',
     grupo: 'cerrada' as const,
     colorClass: 'bg-warning text-warning-foreground',
@@ -27,19 +27,19 @@ export const TIPOS_VIVIENDA = [
   {
     code: 'F' as const,
     key: 'fallidas' as keyof ContadorViviendas,
-    titulo: 'Sin adulto responsable',
-    subtitulo: 'Fallida',
-    descripcion: 'Hay niños elegibles pero no había adulto que autorice o informe.',
-    grupo: 'abierta' as const,
-    colorClass: 'bg-slate-600 text-white',
-    borderClass: 'border-slate-400/40',
-    bgSoft: 'bg-muted',
+    titulo: 'Fallida',
+    subtitulo: '(Cerrada/Sin adulto responsable)',
+    descripcion: 'Casa cerrada o sin adulto responsable; hay niños elegibles pero no se pudo registrar.',
+    grupo: 'cerrada' as const,
+    colorClass: 'bg-primary text-primary-foreground',
+    borderClass: 'border-primary/40',
+    bgSoft: 'bg-primary/10',
   },
   {
     code: 'R' as const,
     key: 'renuentes' as keyof ContadorViviendas,
-    titulo: 'Adulto renuente',
-    subtitulo: 'Renuente',
+    titulo: 'Renuente',
+    subtitulo: 'Rechazo',
     descripcion: 'Había adulto pero se negó a dar información.',
     grupo: 'abierta' as const,
     colorClass: 'bg-destructive text-destructive-foreground',
@@ -54,17 +54,25 @@ export function sumarViviendas(c: HousingCounts): number {
   return c.efectivas + c.noEfectivas + c.fallidas + c.renuentes;
 }
 
-/** Resumen oficial del informe: abiertas vs cerradas */
+/**
+ * Resumen jornada: abiertas (contacto) vs fallidas (casa cerrada / no abordada).
+ * - Abiertas = E + R
+ * - Fallidas = F (casa cerrada / sin adulto) + N (no efectiva / puerta cerrada)
+ */
 export function resumenAbiertasCerradas(c: HousingCounts) {
-  const abiertas = c.efectivas + c.fallidas + c.renuentes;
-  const cerradas = c.noEfectivas;
-  const total = abiertas + cerradas;
+  const abiertas = c.efectivas + c.renuentes;
+  const fallidas = c.fallidas + c.noEfectivas;
+  const total = sumarViviendas(c);
   return {
     abiertas,
-    cerradas,
+    fallidas,
+    /** @deprecated usar fallidas */
+    cerradas: fallidas,
     total,
     pctAbiertas: total > 0 ? Math.round((abiertas / total) * 100) : 0,
-    pctCerradas: total > 0 ? Math.round((cerradas / total) * 100) : 0,
+    pctFallidas: total > 0 ? Math.round((fallidas / total) * 100) : 0,
+    /** @deprecated usar pctFallidas */
+    pctCerradas: total > 0 ? Math.round((fallidas / total) * 100) : 0,
   };
 }
 

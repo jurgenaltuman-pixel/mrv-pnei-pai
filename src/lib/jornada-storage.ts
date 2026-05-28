@@ -9,9 +9,27 @@ function todayKey(userId: string): string {
   return `${KEY_PREFIX}${userId}_${day}`;
 }
 
+export interface RondaHistorialItem {
+  nombre: string;
+  coberturaVacunacion: number | null;
+  aprobado: boolean;
+  efectivas: number;
+  noEfectivas: number;
+  fallidas: number;
+  renuentes: number;
+  totalNinos: number;
+  vacunados: number;
+  visitadas: number;
+  totalCasas: number;
+  completadaAt: number;
+}
+
 export interface JornadaStats extends ContadorViviendas {
   registrosGuardados: number;
   ultimaActualizacion: number;
+  /** Nombre de la ronda/módulo en curso o la última cerrada. */
+  rondaActivaNombre?: string;
+  ultimasRondas?: RondaHistorialItem[];
 }
 
 const EMPTY: JornadaStats = {
@@ -21,6 +39,8 @@ const EMPTY: JornadaStats = {
   renuentes: 0,
   registrosGuardados: 0,
   ultimaActualizacion: 0,
+  rondaActivaNombre: undefined,
+  ultimasRondas: [],
 };
 
 export function getJornadaStats(userId: string): JornadaStats {
@@ -45,6 +65,30 @@ export function acumularJornada(
     fallidas: current.fallidas + (delta.fallidas ?? 0),
     renuentes: current.renuentes + (delta.renuentes ?? 0),
     registrosGuardados: current.registrosGuardados + registrosDelta,
+    ultimaActualizacion: Date.now(),
+  };
+  localStorage.setItem(todayKey(userId), JSON.stringify(next));
+  return next;
+}
+
+export function setRondaActivaNombre(userId: string, nombre: string): JornadaStats {
+  const current = getJornadaStats(userId);
+  const next: JornadaStats = {
+    ...current,
+    rondaActivaNombre: nombre.trim(),
+    ultimaActualizacion: Date.now(),
+  };
+  localStorage.setItem(todayKey(userId), JSON.stringify(next));
+  return next;
+}
+
+export function registrarRondaCompletada(userId: string, item: RondaHistorialItem): JornadaStats {
+  const current = getJornadaStats(userId);
+  const historial = [...(current.ultimasRondas || []), item].slice(-10);
+  const next: JornadaStats = {
+    ...current,
+    rondaActivaNombre: item.nombre,
+    ultimasRondas: historial,
     ultimaActualizacion: Date.now(),
   };
   localStorage.setItem(todayKey(userId), JSON.stringify(next));

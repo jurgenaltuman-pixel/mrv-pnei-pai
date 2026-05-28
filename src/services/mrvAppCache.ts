@@ -78,7 +78,7 @@ async function getJson<T>(key: string): Promise<T | null> {
   }
 }
 
-const ORG_KEY = 'org_structure_v1';
+const ORG_KEY = 'org_structure_v2';
 const REG_KEY = 'registros_snapshot_v1';
 const personaPrefix = 'persona_search:';
 
@@ -108,6 +108,13 @@ export const mrvAppCache = {
 
   async saveRegistrosSnapshot(rows: unknown[]): Promise<void> {
     await putJson(REG_KEY, rows);
+  },
+
+  async prependRegistro(row: unknown): Promise<void> {
+    const existing = (await this.getRegistrosSnapshot()) || [];
+    const id = (row as { id?: string })?.id;
+    const withoutDup = id ? existing.filter((r) => (r as { id?: string })?.id !== id) : existing;
+    await putJson(REG_KEY, [row, ...withoutDup].slice(0, 5000));
   },
 
   async getRegistrosSnapshot(): Promise<unknown[] | null> {
