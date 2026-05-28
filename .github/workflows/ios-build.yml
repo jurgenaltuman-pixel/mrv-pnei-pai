@@ -33,7 +33,12 @@ jobs:
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
-        run: npm run build
+        run: |
+          set -euo pipefail
+          # Si faltan secretos, usar .env.production del repo y no variables vacías.
+          if [ -z "${VITE_SUPABASE_URL:-}" ]; then unset VITE_SUPABASE_URL; fi
+          if [ -z "${VITE_SUPABASE_PUBLISHABLE_KEY:-}" ]; then unset VITE_SUPABASE_PUBLISHABLE_KEY; fi
+          npm run build
 
       - name: Capacitor sync iOS
         run: |

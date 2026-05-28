@@ -44,7 +44,13 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_BUILD_ID: ${{ github.sha }}
-        run: npm ci && npm run build
+        run: |
+          set -euo pipefail
+          npm ci
+          # Si faltan secretos, no sobrescribir .env.production con vacío.
+          if [ -z "${VITE_SUPABASE_URL:-}" ]; then unset VITE_SUPABASE_URL; fi
+          if [ -z "${VITE_SUPABASE_PUBLISHABLE_KEY:-}" ]; then unset VITE_SUPABASE_PUBLISHABLE_KEY; fi
+          npm run build
 
       - name: Upload dist (para deploy)
         uses: actions/upload-artifact@v4

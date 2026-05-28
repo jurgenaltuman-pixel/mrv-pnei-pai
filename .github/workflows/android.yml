@@ -76,7 +76,12 @@ jobs:
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
-        run: npm run build
+        run: |
+          set -euo pipefail
+          # Si el secreto no existe, no pisar los valores de .env.production con string vacío.
+          if [ -z "${VITE_SUPABASE_URL:-}" ]; then unset VITE_SUPABASE_URL; fi
+          if [ -z "${VITE_SUPABASE_PUBLISHABLE_KEY:-}" ]; then unset VITE_SUPABASE_PUBLISHABLE_KEY; fi
+          npm run build
 
       - name: Verify web build output
         run: |
