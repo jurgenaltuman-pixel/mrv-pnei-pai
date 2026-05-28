@@ -825,7 +825,12 @@ export const dataService = {
           }
           return mapped;
         })
-        .filter((r) => r.documento.length >= 4 && r.nombre.length >= 2);
+        .filter((r) => {
+          const hasDoc = r.documento.length >= 4;
+          const hasName = (r.nombre || '').trim().length >= 2;
+          const hasUser = (r.username || '').trim().length >= 2;
+          return hasDoc && (hasName || hasUser);
+        });
     }
     if (!isSupabaseEnabled) return [];
     const docDigits = trimmed.replace(/\D/g, '');
