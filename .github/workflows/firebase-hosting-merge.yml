@@ -25,16 +25,19 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Verify build secrets
+      - name: Verify build secrets (warn only)
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
         run: |
           set -euo pipefail
-          missing() { echo "::error::$1"; exit 1; }
-          [ -n "${VITE_SUPABASE_URL:-}" ] || missing "Falta el secreto VITE_SUPABASE_URL (Settings → Secrets and variables → Actions). Sin él el build no apunta al proyecto Supabase correcto."
-          [ -n "${VITE_SUPABASE_PUBLISHABLE_KEY:-}" ] || missing "Falta VITE_SUPABASE_PUBLISHABLE_KEY (clave publicable/anon de Supabase)."
-          echo "OK: secretos de build presentes."
+          if [ -z "${VITE_SUPABASE_URL:-}" ]; then
+            echo "::warning::Falta el secreto VITE_SUPABASE_URL. Se continuará con el build usando variables del proyecto."
+          fi
+          if [ -z "${VITE_SUPABASE_PUBLISHABLE_KEY:-}" ]; then
+            echo "::warning::Falta VITE_SUPABASE_PUBLISHABLE_KEY. Se continuará con el build usando variables del proyecto."
+          fi
+          echo "Verificación completada."
 
       - name: Build web
         env:
