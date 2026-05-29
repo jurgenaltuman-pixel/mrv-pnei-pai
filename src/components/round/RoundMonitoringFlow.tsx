@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { useGeolocation } from '@/hooks/useGeolocation';
 import { parseCoordsFromMapsLink } from '@/lib/maps-coords';
@@ -6,6 +6,7 @@ import {
   casaPermiteReedicionVisita,
   computeRoundSummary,
   countCasasEfectivas,
+  getEstadoConfig,
   requiereNinos,
 } from '@/lib/croquis-housing';
 import { requiereGpsEnVisita, usaUbicacionEncuestadorAsignada } from '@/lib/monitoreo-vacunacion';
@@ -155,6 +156,7 @@ export default function RoundMonitoringFlow({
   const [rondaRegistrada, setRondaRegistrada] = useState(false);
   const [equipoUsuarios, setEquipoUsuarios] = useState<EquipoMiembro[]>([]);
   const [activeDrafts, setActiveDrafts] = useState<RoundMonitoring[]>([]);
+  const childReturnFaseRef = useRef<RoundMonitoring['fase'] | null>(null);
 
   const applyEquipoFromRound = useCallback((r: RoundMonitoring) => {
     const ids = r.colaboradorUserIds || [];
@@ -451,23 +453,44 @@ export default function RoundMonitoringFlow({
       setEstadoDraft('E');
       toast({ title: 'Casa Efectiva (E)', description: 'Niño no vacunado registrado' });
     }
-    await persist({ ...aplicarUbicacionARonda(round), casas, fase: 'house' });
+    const returnFase = childReturnFaseRef.current ?? 'house';
+    childReturnFaseRef.current = null;
+    await persist({ ...aplicarUbicacionARonda(round), casas, fase: returnFase });
     toast({
       title: yaExistia ? 'Cambios guardados' : 'Niño/a agregado',
       description: nino.nombre,
     });
   };
 
+  const abrirFormularioNino = async (
+    n: NinoCasa,
+    casaNumero: number,
+    returnFase: RoundMonitoring['fase']
+  ) => {
+    if (!round) return;
+    childReturnFaseRef.current = returnFase;
+    onPrepareEditNino?.(n);
+    await persist({ ...round, fase: 'add-child', casaActiva: casaNumero });
+  };
+
   const handleEditNino = async (n: NinoCasa) => {
     if (!round || !casaActual) return;
-    onPrepareEditNino?.(n);
-    await persist({ ...round, fase: 'add-child', casaActiva: casaActual.numero });
+    await abrirFormularioNino(n, casaActual.numero, 'house');
+  };
+
+  const handleEditNinoDesdeCasaGuardada = async (n: NinoCasa) => {
+    if (!round || round.fase !== 'edit-casa' || round.casaActiva == null) return;
+    const casa = round.casas.find((c) => c.numero === round.casaActiva && c.guardada);
+    if (!casa) return;
+    await abrirFormularioNino(n, casa.numero, 'edit-casa');
   };
 
   const volverDesdeFormularioNino = async () => {
     onCancelEditNino?.();
     if (!round) return;
-    await persist({ ...round, fase: 'house' });
+    const returnFase = childReturnFaseRef.current ?? 'house';
+    childReturnFaseRef.current = null;
+    await persist({ ...round, fase: returnFase });
   };
 
   const handleSaveHouse = async () => {
@@ -771,11 +794,14 @@ export default function RoundMonitoringFlow({
 
   if (round.fase === 'add-child' && casaActual) {
     const editandoNino = Boolean(editingNinoId);
+    const estadoCasaLabel = casaActual.estado ? getEstadoConfig(casaActual.estado).titulo : 'Efectiva';
     return (
       <div className="mrv-flow-container flex flex-col gap-4">
         {roundProgress}
         <div className="mrv-panel">
-          <span className="mrv-step-pill">Casa {casaActual.numero} · Efectiva</span>
+          <span className="mrv-step-pill">
+            Casa {casaActual.numero} · {estadoCasaLabel}
+          </span>
           <h2 className="text-lg font-bold mt-2">
             {editandoNino ? 'Editar registro del niño/a' : 'Registro del niño/a'}
           </h2>
@@ -817,6 +843,7 @@ export default function RoundMonitoringFlow({
           onCancel={() => void persist({ ...round, fase: 'croquis' })}
           onSave={(casa, estado) => void handleSaveCasaEditada(casa, estado)}
           onPatchRegistro={patchRegistroEnRonda}
+          onEditNino={(n) => void handleEditNinoDesdeCasaGuardada(n)}
           onReabrirVisita={
             casaEnEdicion.estado && casaPermiteReedicionVisita(casaEnEdicion.estado)
               ? () => void reabrirCasaGuardada(casaEnEdicion.numero)

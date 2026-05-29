@@ -881,13 +881,13 @@ export default function MainApp() {
       viviendaTipo === 'revisitada'
         ? 'Visita N: casa cerrada o sin niños elegibles'
         : viviendaTipo === 'sin_adulto_responsable'
-          ? 'Visita F: niños elegibles sin adulto responsable'
+          ? 'Visita F: cerrada con o sin niños / sin responsable'
           : 'Visita R: adulto renuente a informar';
     const visitaNombre =
       viviendaTipo === 'revisitada'
         ? 'Visita N — sin niño elegible / casa cerrada'
         : viviendaTipo === 'sin_adulto_responsable'
-          ? 'Visita F — sin adulto responsable'
+          ? 'Visita F — (Cerrada con o sin niños/Sin responsable)'
           : 'Visita R — renuente';
     const visitaDoc =
       viviendaTipo === 'revisitada' ? 'VISITA-N' : viviendaTipo === 'sin_adulto_responsable' ? 'VISITA-F' : 'VISITA-R';

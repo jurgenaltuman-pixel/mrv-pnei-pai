@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import html2canvas from 'html2canvas';
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -6,7 +7,7 @@ import type { RegistroMRV } from '@/services/dataService';
 import { MAP_ATTRIBUTION, MAP_CENTER_PY, MAP_DEFAULT_ZOOM, MAP_TILE_URL } from '@/lib/map-config';
 import { registroMapLabelHtml } from '@/lib/map-labels';
 import { normalizeTipoVivienda } from '@/lib/dashboard-stats';
-import { MapPin } from 'lucide-react';
+import { Download, MapPin } from 'lucide-react';
 
 type GeoRegistro = RegistroMRV & { lat: number; lng: number };
 
@@ -18,6 +19,8 @@ interface Props {
   userLat?: number | null;
   userLng?: number | null;
   maxMarkers?: number;
+  /** Botón para guardar captura JPG del mapa visible */
+  showDownload?: boolean;
 }
 
 function registroKey(r: GeoRegistro) {
@@ -92,8 +95,11 @@ export default function MrvMapPanel({
   userLat,
   userLng,
   maxMarkers = 400,
+  showDownload = true,
 }: Props) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const mapShellRef = useRef<HTMLDivElement>(null);
 
   const geo = useMemo(() => {
     return registros
@@ -125,8 +131,34 @@ export default function MrvMapPanel({
     setSelectedKey((prev) => (prev === key ? null : key));
   }, []);
 
+  const downloadMapJpg = useCallback(async () => {
+    const el = mapShellRef.current;
+    if (!el || downloading) return;
+    setDownloading(true);
+    try {
+      const canvas = await html2canvas(el, {
+        useCORS: true,
+        allowTaint: true,
+        scale: 2,
+        backgroundColor: '#ffffff',
+        logging: false,
+        ignoreElements: (node) => node.classList?.contains('mrv-map-download-btn') ?? false,
+      });
+      const stamp = new Date().toISOString().slice(0, 10);
+      const link = document.createElement('a');
+      link.download = `mapa-mrv-${stamp}.jpg`;
+      link.href = canvas.toDataURL('image/jpeg', 0.92);
+      link.click();
+    } catch {
+      // fallback silencioso si tiles bloquean captura
+    } finally {
+      setDownloading(false);
+    }
+  }, [downloading]);
+
   return (
     <div
+      ref={mapShellRef}
       className={`relative rounded-2xl border shadow-sm mrv-map-shell ${className}`}
       style={{ height }}
     >
@@ -175,8 +207,22 @@ export default function MrvMapPanel({
         })}
       </MapContainer>
 
-      <div className="absolute top-2 right-2 z-[1000] rounded-lg bg-card/95 backdrop-blur px-2 py-1 text-[9px] font-bold text-muted-foreground border shadow-sm pointer-events-none">
-        OpenStreetMap · Gratis
+      <div className="absolute top-2 right-2 z-[1000] flex flex-col items-end gap-1.5">
+        {showDownload && (
+          <button
+            type="button"
+            disabled={downloading}
+            onClick={() => void downloadMapJpg()}
+            className="mrv-map-download-btn pointer-events-auto flex items-center gap-1.5 rounded-lg bg-card/95 backdrop-blur px-2.5 py-1.5 text-[10px] font-bold text-primary border shadow-sm hover:bg-card disabled:opacity-60"
+            title="Guardar imagen JPG del mapa con puntos y leyenda"
+          >
+            <Download className="w-3.5 h-3.5" />
+            {downloading ? 'Generando…' : 'Descargar mapa (JPG)'}
+          </button>
+        )}
+        <div className="rounded-lg bg-card/95 backdrop-blur px-2 py-1 text-[9px] font-bold text-muted-foreground border shadow-sm pointer-events-none">
+          OpenStreetMap · Gratis
+        </div>
       </div>
       {showLegend && (
         <div className="absolute bottom-3 left-3 right-3 sm:right-auto z-[1000] flex flex-col sm:flex-row gap-1.5 sm:items-center sm:gap-2 pointer-events-none">

@@ -1,9 +1,7 @@
 import { useState } from 'react';
 import { Home, Pencil, Save, Undo2, X } from 'lucide-react';
 import EstadoCasaButtons from './EstadoCasaButtons';
-import RegistroEditDialog, { type RegistroEditFields } from '@/components/mrv/RegistroEditDialog';
 import { getEstadoConfig } from '@/lib/croquis-housing';
-import { ninoToRegistroEditFields, patchFromRegistroEdit } from '@/lib/nino-casa-registro';
 import { formatRoundCodigoDisplay } from '@/lib/round-codigo';
 import type { CasaEstadoCode, CasaMonitoreo, NinoCasa, RoundMonitoring } from '@/types/round-monitoring';
 
@@ -17,6 +15,8 @@ interface Props {
   onSave: (casa: CasaMonitoreo, estado: CasaEstadoCode) => void;
   onPatchRegistro: (registroId: string, patch: Record<string, unknown>) => Promise<string | null>;
   onReabrirVisita?: () => void;
+  /** Formulario completo de niño (mismo que «Añadir niños») */
+  onEditNino?: (n: NinoCasa) => void;
 }
 
 export default function CasaGuardadaEditor({
@@ -27,44 +27,19 @@ export default function CasaGuardadaEditor({
   saving,
   onCancel,
   onSave,
-  onPatchRegistro,
   onReabrirVisita,
+  onEditNino,
 }: Props) {
   const [casa, setCasa] = useState(initialCasa);
   const [estado, setEstado] = useState<CasaEstadoCode>(initialCasa.estado!);
-  const [registroEdit, setRegistroEdit] = useState<RegistroEditFields | null>(null);
-  const [editingNinoId, setEditingNinoId] = useState<string | null>(null);
-  const [savingRegistro, setSavingRegistro] = useState(false);
 
   const cfg = getEstadoConfig(estado);
   const codigo = formatRoundCodigoDisplay(round);
 
   const openNinoEdit = (n: NinoCasa) => {
-    if (!n.registroId && !isAdmin) {
-      return;
-    }
-    setRegistroEdit(ninoToRegistroEditFields(n, round, casa.numero));
-    setEditingNinoId(n.id);
-  };
-
-  const saveRegistroEdit = async (patch: Record<string, unknown>) => {
-    const nino = casa.ninos.find((n) => n.id === editingNinoId);
-    if (!nino?.registroId) {
-      setRegistroEdit(null);
-      setEditingNinoId(null);
-      return;
-    }
-    setSavingRegistro(true);
-    const err = await onPatchRegistro(nino.registroId, patch);
-    setSavingRegistro(false);
-    if (err) return;
-    const updated = patchFromRegistroEdit(patch, nino);
-    setCasa({
-      ...casa,
-      ninos: casa.ninos.map((n) => (n.id === nino.id ? { ...n, ...updated } : n)),
-    });
-    setRegistroEdit(null);
-    setEditingNinoId(null);
+    if (!onEditNino) return;
+    if (!n.registroId && !isAdmin) return;
+    onEditNino(n);
   };
 
   return (
@@ -154,16 +129,6 @@ export default function CasaGuardadaEditor({
       {!canEditRegistros && (
         <p className="text-sm text-muted-foreground">Sin permiso para editar esta casa.</p>
       )}
-
-      <RegistroEditDialog
-        registro={registroEdit}
-        saving={savingRegistro}
-        onClose={() => {
-          setRegistroEdit(null);
-          setEditingNinoId(null);
-        }}
-        onSave={(patch) => void saveRegistroEdit(patch)}
-      />
     </div>
   );
 }

@@ -30,7 +30,11 @@ function buildVisitaPayload(
     if (casa.ninos.length === 0) {
       const labels = {
         N: { nombre: 'Visita N — no efectiva', doc: 'VISITA-N', motivo: 'Visita N: no efectiva abierta' },
-        F: { nombre: 'Visita F — fallida', doc: 'VISITA-F', motivo: 'Visita F: cerrada / sin adulto' },
+        F: {
+          nombre: 'Visita F — fallida',
+          doc: 'VISITA-F',
+          motivo: 'Visita F: cerrada con o sin niños / sin responsable',
+        },
         R: { nombre: 'Visita R — renuente', doc: 'VISITA-R', motivo: 'Visita R: renuente rechazo' },
       }[casa.estado];
       return {

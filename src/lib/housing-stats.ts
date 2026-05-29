@@ -1,52 +1,55 @@
 import type { ContadorViviendas } from '@/types/mrv';
+import { CROQUIS_ESTADOS, getEstadoConfig } from '@/lib/croquis-housing';
+import type { CasaEstadoCode } from '@/types/round-monitoring';
 
-/** Tipos de vivienda — etiquetas oficiales del informe MRV / dashboard */
-export const TIPOS_VIVIENDA = [
-  {
-    code: 'E' as const,
-    key: 'efectivas' as keyof ContadorViviendas,
-    titulo: 'Efectiva',
-    subtitulo: 'Abierta',
-    descripcion: 'La brigada entró y registró datos del niño elegible (o rechazo con datos).',
-    grupo: 'abierta' as const,
-    colorClass: 'bg-success text-success-foreground',
-    borderClass: 'border-success/40',
-    bgSoft: 'bg-success/10',
-  },
-  {
-    code: 'N' as const,
-    key: 'noEfectivas' as keyof ContadorViviendas,
-    titulo: 'No efectiva',
-    subtitulo: 'Abierta',
-    descripcion: 'Puerta cerrada, no hay niños elegibles o no se pudo abordar la vivienda.',
-    grupo: 'cerrada' as const,
-    colorClass: 'bg-warning text-warning-foreground',
-    borderClass: 'border-warning/40',
-    bgSoft: 'bg-warning/10',
-  },
-  {
-    code: 'F' as const,
-    key: 'fallidas' as keyof ContadorViviendas,
-    titulo: 'Fallida',
-    subtitulo: '(Cerrada/Sin adulto responsable)',
-    descripcion: 'Casa cerrada o sin adulto responsable; hay niños elegibles pero no se pudo registrar.',
-    grupo: 'cerrada' as const,
-    colorClass: 'bg-primary text-primary-foreground',
-    borderClass: 'border-primary/40',
-    bgSoft: 'bg-primary/10',
-  },
-  {
-    code: 'R' as const,
-    key: 'renuentes' as keyof ContadorViviendas,
-    titulo: 'Renuente',
-    subtitulo: 'Rechazo',
-    descripcion: 'Había adulto pero se negó a dar información.',
-    grupo: 'abierta' as const,
-    colorClass: 'bg-destructive text-destructive-foreground',
-    borderClass: 'border-destructive/40',
-    bgSoft: 'bg-destructive/10',
-  },
-] as const;
+const KEY_BY_CODE: Record<CasaEstadoCode, keyof ContadorViviendas> = {
+  E: 'efectivas',
+  N: 'noEfectivas',
+  F: 'fallidas',
+  R: 'renuentes',
+};
+
+const GRUPO_BY_CODE: Record<CasaEstadoCode, 'abierta' | 'cerrada'> = {
+  E: 'abierta',
+  N: 'cerrada',
+  F: 'cerrada',
+  R: 'abierta',
+};
+
+const DESCRIPCION_BY_CODE: Record<CasaEstadoCode, string> = {
+  E: 'La brigada entró y registró datos del niño elegible (o rechazo con datos).',
+  N: 'Puerta cerrada, no hay niños elegibles o no se pudo abordar la vivienda.',
+  F: 'Casa cerrada o sin responsable; puede haber o no niños elegibles en el hogar.',
+  R: 'Había adulto pero se negó a dar información.',
+};
+
+function splitBgSoft(bgSoft: string) {
+  const parts = bgSoft.split(' ');
+  return {
+    bgSoft: parts.find((p) => p.startsWith('bg-')) ?? bgSoft,
+    borderClass: parts.find((p) => p.startsWith('border-')) ?? 'border-border',
+  };
+}
+
+/** Tipos de vivienda — mismas etiquetas que monitoreo (CROQUIS_ESTADOS) */
+export const TIPOS_VIVIENDA = CROQUIS_ESTADOS.map((e) => {
+  const soft = splitBgSoft(e.bgSoft);
+  return {
+    code: e.code,
+    key: KEY_BY_CODE[e.code],
+    titulo: e.titulo,
+    subtitulo: e.linea2,
+    descripcion: DESCRIPCION_BY_CODE[e.code],
+    grupo: GRUPO_BY_CODE[e.code],
+    colorClass: e.colorClass.split(' ').filter((c) => !c.startsWith('border-')).join(' '),
+    borderClass: soft.borderClass,
+    bgSoft: soft.bgSoft,
+  };
+});
+
+export function subtituloEstado(code: CasaEstadoCode): string {
+  return getEstadoConfig(code).linea2;
+}
 
 export type HousingCounts = ContadorViviendas;
 
@@ -65,7 +68,6 @@ export function resumenAbiertasCerradas(c: HousingCounts) {
   const total = sumarViviendas(c);
   return {
     abiertas,
-    /** Visitas E+N+F — etiqueta «Fallida · cerradas» en UI */
     fallidas: cerradas,
     cerradas,
     total,

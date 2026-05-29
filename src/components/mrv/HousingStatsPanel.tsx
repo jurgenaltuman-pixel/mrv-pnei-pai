@@ -3,6 +3,7 @@ import { DoorOpen, CircleX, HelpCircle, ChevronDown, ChevronUp } from 'lucide-re
 import {
   TIPOS_VIVIENDA,
   resumenAbiertasCerradas,
+  subtituloEstado,
   sumarViviendas,
   type HousingCounts,
 } from '@/lib/housing-stats';
@@ -56,7 +57,7 @@ export default function HousingStatsPanel({ contador, variant = 'full', showHelp
             </div>
             <p className="text-3xl font-black text-destructive leading-none">{fallidas}</p>
             <p className="text-[10px] text-muted-foreground mt-1.5 leading-snug">
-              Casa cerrada / sin adulto (F)
+              {subtituloEstado('F')} (F)
             </p>
             {total > 0 && (
               <p className="text-[10px] font-semibold text-destructive/80 mt-1">{pctFallidas}% del total</p>

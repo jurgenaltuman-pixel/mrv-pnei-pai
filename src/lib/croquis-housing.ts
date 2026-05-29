@@ -25,7 +25,7 @@ export const CROQUIS_ESTADOS = [
     code: 'F' as const,
     titulo: 'Fallida',
     linea1: 'Fallida',
-    linea2: '(Cerrada/Sin adulto responsable)',
+    linea2: '(Cerrada con o sin niños/Sin responsable)',
     linea3: '',
     colorClass: 'bg-primary text-primary-foreground border-primary',
     bgSoft: 'bg-primary/15 border-primary/40',
