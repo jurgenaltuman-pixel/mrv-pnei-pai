@@ -20,11 +20,11 @@ export default function BottomNav({ active, onChange, showAdmin }: Props) {
       <div className="w-full flex">
         {tabs.map(tab => (
           <button key={tab.id} onClick={() => onChange(tab.id)}
-            className={`nav-tab max-lg:min-h-[52px] ${active === tab.id ? 'nav-tab-active' : 'text-muted-foreground'}`}>
-            <div className={`mx-auto mb-0.5 p-1.5 max-lg:p-2 rounded-lg transition-colors ${active === tab.id ? 'bg-primary/10' : ''}`}>
-              <tab.Icon className="w-5 h-5 max-lg:w-[1.35rem] max-lg:h-[1.35rem]" />
+            className={`nav-tab max-lg:min-h-[58px] max-lg:py-1 ${active === tab.id ? 'nav-tab-active' : 'text-muted-foreground'}`}>
+            <div className={`mx-auto mb-1 p-1.5 max-lg:p-2.5 rounded-lg transition-colors ${active === tab.id ? 'bg-primary/10' : ''}`}>
+              <tab.Icon className="w-5 h-5 max-lg:w-7 max-lg:h-7" />
             </div>
-            <span className="text-[10px] max-lg:text-[11px]">{tab.label}</span>
+            <span className="text-[10px] max-lg:text-sm max-lg:font-semibold">{tab.label}</span>
           </button>
         ))}
       </div>

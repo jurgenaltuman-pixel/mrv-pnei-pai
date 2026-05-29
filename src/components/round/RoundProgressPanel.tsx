@@ -26,10 +26,10 @@ function RoundProgressPanel({ moduloLabel, roundCodigo, casas, totalCasas, compa
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex items-center gap-2">
-          <Home className="w-4 h-4 shrink-0 text-primary" />
+          <Home className="w-4 h-4 max-lg:w-5 max-lg:h-5 shrink-0 text-primary" />
           <div className="min-w-0">
             {moduloLabel && (
-              <p className="text-xs font-bold text-foreground truncate">Ronda: {moduloLabel}</p>
+              <p className="text-xs max-lg:text-sm font-bold text-foreground truncate">Ronda: {moduloLabel}</p>
             )}
             {roundCodigo && (
               <p className="text-[10px] font-mono text-muted-foreground">ID {roundCodigo}</p>
@@ -44,7 +44,7 @@ function RoundProgressPanel({ moduloLabel, roundCodigo, casas, totalCasas, compa
             </p>
           </div>
         </div>
-        <span className="text-sm font-black tabular-nums text-primary shrink-0">{pct}%</span>
+        <span className="text-sm max-lg:text-base font-black tabular-nums text-primary shrink-0">{pct}%</span>
       </div>
 
       <div className="h-2 rounded-full bg-muted overflow-hidden" aria-hidden>

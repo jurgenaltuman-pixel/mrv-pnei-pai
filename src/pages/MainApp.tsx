@@ -1093,7 +1093,7 @@ export default function MainApp() {
   };
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 min-h-dvh w-full max-w-[100vw] bg-background overflow-x-hidden">
+    <div className="mrv-app-root flex flex-col flex-1 min-h-0 min-h-dvh w-full max-w-[100vw] bg-background overflow-x-hidden">
       <CampaignAppHeader
         user={user}
         isOnline={isOnline}
@@ -1147,7 +1147,7 @@ export default function MainApp() {
 
       <main className="flex-1 min-h-0 w-full pb-app box-border">
         {tab === 'registro' && user && (
-          <div className="p-2.5 sm:p-4 lg:p-6 pb-20 max-lg:pb-[calc(5.25rem+env(safe-area-inset-bottom))] w-full box-border max-lg:px-3">
+          <div className="p-3 sm:p-4 lg:p-6 pb-20 max-lg:pb-[calc(5.5rem+env(safe-area-inset-bottom))] w-full box-border max-lg:px-4">
             <RoundMonitoringFlow
                 userId={user.id}
                 entrevistadorNombre={user.nombre || responsable || user.email}

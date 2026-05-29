@@ -74,18 +74,18 @@ export default function RecentRoundsDock({
       <button
         type="button"
         onClick={handleChipClick}
-        className="fixed bottom-[calc(3.85rem+env(safe-area-inset-bottom))] right-2.5 z-40 flex items-center gap-1 rounded-full border border-border/80 bg-card/95 backdrop-blur-sm shadow-md pl-2 pr-2.5 py-1.5 text-left hover:bg-muted/50 active:scale-[0.98]"
+        className="fixed bottom-[calc(4.25rem+env(safe-area-inset-bottom))] max-lg:bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-3 z-40 flex items-center gap-1.5 rounded-full border border-border/80 bg-card/95 backdrop-blur-sm shadow-md pl-2.5 pr-3 py-2 max-lg:py-2.5 text-left hover:bg-muted/50 active:scale-[0.98]"
         aria-label={
           pendientes.length === 1
             ? `Continuar ronda ${pendientes[0].moduloLabel}`
             : `Ver ${pendientes.length} rondas recientes`
         }
       >
-        <History className="w-3.5 h-3.5 text-primary shrink-0" />
-        <span className="text-[10px] font-bold tabular-nums text-primary leading-none">
+        <History className="w-4 h-4 max-lg:w-5 max-lg:h-5 text-primary shrink-0" />
+        <span className="text-[11px] max-lg:text-sm font-bold tabular-nums text-primary leading-none">
           {pendientes.length}
         </span>
-        <span className="text-[10px] font-semibold text-muted-foreground hidden sm:inline">
+        <span className="text-[11px] max-lg:text-sm font-semibold text-muted-foreground max-lg:inline hidden sm:inline">
           recientes
         </span>
       </button>
@@ -96,7 +96,7 @@ export default function RecentRoundsDock({
           className="rounded-t-2xl px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-4 max-h-[min(72vh,520px)] flex flex-col"
         >
           <SheetHeader className="text-left pb-2 shrink-0">
-            <SheetTitle className="text-base">Rondas recientes</SheetTitle>
+            <SheetTitle className="text-base max-lg:text-lg">Rondas recientes</SheetTitle>
             <SheetDescription>
               {pendientes.length} pendiente{pendientes.length === 1 ? '' : 's'} — elegí una para
               continuar

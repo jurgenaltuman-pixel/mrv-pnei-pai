@@ -409,50 +409,187 @@
   }
 }
 
-/* Móvil y tablet: más legible y táctil. Escritorio (lg+) sin cambios. */
+/* Móvil y tablet: interfaz más grande y táctil. Escritorio (lg+) sin cambios. */
 @media (max-width: 1023px) {
+  html {
+    font-size: 17px;
+  }
+
+  .mrv-app-root .text-\[9px\] {
+    font-size: 0.7rem !important;
+    line-height: 1.35;
+  }
+  .mrv-app-root .text-\[10px\] {
+    font-size: 0.8125rem !important;
+    line-height: 1.4;
+  }
+  .mrv-app-root .text-\[11px\] {
+    font-size: 0.875rem !important;
+    line-height: 1.4;
+  }
+
   .mrv-flow-container {
-    padding-left: max(0.75rem, env(safe-area-inset-left, 0px));
-    padding-right: max(0.75rem, env(safe-area-inset-right, 0px));
+    padding-left: max(1rem, env(safe-area-inset-left, 0px));
+    padding-right: max(1rem, env(safe-area-inset-right, 0px));
+    gap: 1rem;
   }
+
+  .section-card {
+    padding: 1rem 1.125rem;
+    margin-bottom: 0.875rem;
+  }
+
   .mrv-panel {
-    padding: 0.875rem 1rem;
+    padding: 1.125rem 1.25rem;
+    margin-bottom: 0.875rem;
   }
+
+  .mrv-panel-title {
+    font-size: 1.125rem;
+  }
+
+  .mrv-step-pill {
+    font-size: 0.6875rem;
+    padding: 0.35rem 0.75rem;
+  }
+
+  .section-title {
+    font-size: 0.8125rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .field-label {
+    font-size: 0.8125rem;
+    margin-bottom: 0.35rem;
+  }
+
   .mrv-btn-primary,
-  .mrv-btn-success,
+  .mrv-btn-success {
+    min-height: 3.25rem;
+    font-size: 1.0625rem;
+  }
+
   .mrv-btn-ghost {
     min-height: 3rem;
-    font-size: 0.9375rem;
+    font-size: 1rem;
   }
+
   .mrv-choice-btn {
-    min-height: 3.25rem;
-    font-size: 0.9375rem;
+    min-height: 3.5rem;
+    font-size: 1.0625rem;
   }
+
+  .mrv-dosis-btn {
+    min-height: 4.25rem;
+  }
+
+  .mrv-hero-card {
+    padding: 1.25rem 1.375rem;
+  }
+
   .auth-input {
-    min-height: 2.75rem;
+    min-height: 3rem;
     font-size: 16px;
   }
+
   .nav-tab {
-    min-height: 3.25rem;
+    min-height: 3.5rem;
+    font-size: 0.8125rem;
   }
+
   .pb-app {
-    padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(5.25rem + env(safe-area-inset-bottom, 0px));
   }
-  .croquis-house-progress {
-    max-height: 5.5rem;
-    gap: 0.4rem;
+
+  .croquis-seat {
+    min-height: 3.5rem;
+    padding: 0.35rem;
   }
-  .croquis-house-dot-active {
-    width: 0.7rem;
-    height: 0.7rem;
-  }
-  .croquis-house-img {
-    width: 6.5rem;
-    height: 6.5rem;
-  }
-  .croquis-house-badge {
+
+  .croquis-seat-num {
     font-size: 1rem;
-    padding: 0.35rem 0.65rem;
+  }
+
+  .croquis-seat-code {
+    font-size: 0.6875rem;
+  }
+
+  .croquis-seat-meta {
+    font-size: 0.625rem;
+  }
+
+  .croquis-house-progress {
+    max-height: 6rem;
+    gap: 0.45rem;
+  }
+
+  .croquis-house-dot-active {
+    width: 0.75rem;
+    height: 0.75rem;
+  }
+
+  .croquis-house-img {
+    width: 8rem;
+    height: 8rem;
+  }
+
+  .croquis-house-badge {
+    font-size: 1.125rem;
+    padding: 0.4rem 0.75rem;
+  }
+
+  .croquis-house-stage {
+    padding: 1.125rem 1rem;
+  }
+
+  .dash-kpi {
+    padding: 1rem 1.125rem;
+  }
+
+  .dash-kpi .text-2xl {
+    font-size: 1.75rem;
+    line-height: 2rem;
+  }
+
+  .dash-select {
+    min-height: 2.75rem;
+    font-size: 0.875rem;
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+
+  .dash-btn-primary,
+  .dash-btn-secondary {
+    min-height: 2.75rem;
+    font-size: 0.875rem;
+    padding-left: 0.875rem;
+    padding-right: 0.875rem;
+  }
+
+  .counter-btn {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    font-size: 1.375rem;
+  }
+
+  .mrv-map-label-inner {
+    font-size: 0.75rem;
+    max-width: 13rem;
+  }
+
+  .mrv-map-label-inner .mrv-label-name {
+    font-size: 0.875rem;
+  }
+
+  .mrv-map-label-inner .mrv-label-meta,
+  .mrv-map-label-inner .mrv-label-motivo {
+    font-size: 0.6875rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  html {
+    font-size: 16px;
   }
 }
 
