@@ -1,6 +1,5 @@
 import { supabase, isSupabaseEnabled } from '@/integrations/supabase/client';
 import {
-  MRV_API_URL,
   USE_MRV_API,
   USE_SUPABASE_PADRON,
   USE_SUPABASE_REGISTROS,
@@ -810,14 +809,15 @@ export const dataService = {
     if (hasLetter && trimmed.length < 3 && !trimmed.includes(' ')) return [];
     const limit = Math.min(20, options?.limit ?? 12);
     if (USE_MRV_API) {
-      const url = `${MRV_API_URL}/api/public/nomina-search?q=${encodeURIComponent(trimmed)}`;
-      const res = await fetch(url, { signal: options?.signal });
-      const body = (await res.json().catch(() => ({}))) as { data?: unknown[]; error?: string };
-      if (!res.ok) {
-        throw new Error(body.error || `Error de búsqueda (${res.status})`);
+      const { data: body, error, status } = await mrvApiFetch<{ data?: unknown[] }>(
+        `/api/public/nomina-search?q=${encodeURIComponent(trimmed)}`,
+        { signal: options?.signal }
+      );
+      if (error) {
+        throw new Error(error || `Error de búsqueda (${status})`);
       }
-      if (!Array.isArray(body.data)) return [];
-      return body.data
+      if (!Array.isArray(body?.data)) return [];
+      return body!.data!
         .slice(0, limit)
         .map((row) => {
           const mapped = mapNominaApiRow(row as Record<string, unknown>);

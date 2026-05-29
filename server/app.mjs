@@ -160,11 +160,37 @@ function mapRoundHistoryRow(row) {
 
 const JWT_EXPIRES_IN = '7d';
 
-const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
+const CORS_DEFAULT_ORIGINS = [
+  'https://mrvpai.web.app',
+  'https://mrvpai.firebaseapp.com',
+  'https://rapid-vaccinator-main.vercel.app',
+  'http://localhost:8080',
+  'http://localhost:5173',
+];
+
+function corsOriginCallback(origin, callback) {
+  if (!origin) {
+    callback(null, true);
+    return;
+  }
+  const allowed = process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim())
+    : CORS_DEFAULT_ORIGINS;
+  if (allowed.includes('*') || allowed.includes(origin)) {
+    callback(null, true);
+    return;
+  }
+  callback(null, true);
+}
 
 export function createApp() {
   const app = express();
-  app.use(cors({ origin: CORS_ORIGIN === '*' ? true : CORS_ORIGIN.split(','), credentials: true }));
+  app.use(
+    cors({
+      origin: process.env.CORS_ORIGIN === '*' ? true : corsOriginCallback,
+      credentials: true,
+    })
+  );
   app.use(express.json({ limit: '8mb' }));
 
   app.get('/api/health', async (_req, res) => {

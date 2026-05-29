@@ -38,12 +38,11 @@ export function resolveMrvApiBaseUrl(): string {
 
   if (typeof window !== 'undefined') {
     const host = window.location.hostname.toLowerCase();
-    if (
-      host === 'localhost' ||
-      host === '127.0.0.1' ||
-      host.endsWith('.vercel.app')
-    ) {
+    if (host === 'localhost' || host === '127.0.0.1' || host.endsWith('.vercel.app')) {
       return '';
+    }
+    if (host.endsWith('.web.app') || host.endsWith('.firebaseapp.com')) {
+      return MRV_API_PRODUCTION_DEFAULT;
     }
     return MRV_API_PRODUCTION_DEFAULT;
   }
@@ -183,10 +182,10 @@ export async function mrvApiFetch<T = unknown>(
     res = await doFetch();
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    const hint =
-      /ECONNREFUSED|ETIMEDOUT|Failed to fetch|NetworkError/i.test(msg)
-        ? 'No hay conexión con la API. Si el administrador migró la base de datos, debe actualizar DATABASE_URL en Vercel/Firebase y volver a desplegar.'
-        : msg;
+    const apiLabel = base || '(mismo sitio)';
+    const hint = /ECONNREFUSED|ETIMEDOUT|Failed to fetch|NetworkError|Load failed/i.test(msg)
+      ? `Sin conexión con la API (${apiLabel}). Probá otra red, desactivá VPN, actualizá la app (cerrar y abrir) o usá ${MRV_API_PRODUCTION_DEFAULT}. La base de datos se configura en Vercel, no en Git.`
+      : msg;
     return { error: hint, status: 0 };
   }
 
