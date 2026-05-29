@@ -13,7 +13,7 @@ document.documentElement.lang = "es";
 document.documentElement.translate = false;
 
 /** Bump al desplegar si hay que forzar otro barrido (chunks viejos, SW roto). */
-const SW_SWEEP_KEY = "mrv-sw-sweep-2026-05-27-chunk-mapview";
+const SW_SWEEP_KEY = "mrv-sw-sweep-2026-05-28-labels-map";
 
 function sweepMarkerIsSet(): boolean {
   try {
@@ -85,6 +85,12 @@ function setBootProgressUI(pct: number, label?: string): void {
 }
 
 async function boot(): Promise<void> {
+  try {
+    const { ensureFreshBuildOnBoot } = await import("./lib/force-app-update.ts");
+    if (await ensureFreshBuildOnBoot()) return;
+  } catch {
+    /* ignore */
+  }
   if (await sweepStaleCachesOnce()) return;
 
   try {

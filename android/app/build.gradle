@@ -6,8 +6,8 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
 }
 
-def appVersionName = project.hasProperty('VERSION_NAME') ? project.VERSION_NAME : "2.6.1"
-def appVersionCode = project.hasProperty('VERSION_CODE') ? project.VERSION_CODE.toInteger() : 20601
+def appVersionName = project.hasProperty('VERSION_NAME') ? project.VERSION_NAME : "2.6.2"
+def appVersionCode = project.hasProperty('VERSION_CODE') ? project.VERSION_CODE.toInteger() : 20602
 
 android {
     namespace = "py.gov.mspbs.mrv2026"

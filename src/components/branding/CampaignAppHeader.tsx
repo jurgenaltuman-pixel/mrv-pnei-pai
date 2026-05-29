@@ -1,5 +1,6 @@
-import { Building2, Download, LogOut, MapPinned, Stethoscope, User, WifiOff } from 'lucide-react';
+import { Building2, Download, LogOut, MapPinned, RefreshCw, Stethoscope, User, WifiOff } from 'lucide-react';
 import { APP_TITLE_PRIMARY } from '@/lib/app-branding';
+import { APP_BUILD_ID, forceAppUpdate } from '@/lib/force-app-update';
 import { ThemeToggle } from '@/components/ThemeToggle';
 
 export interface CampaignAppHeaderProps {
@@ -110,6 +111,15 @@ export function CampaignAppHeader({
                 </span>
               )}
               <ThemeToggle className="!p-1.5 !rounded-lg border-sky-200/80 dark:border-slate-600" />
+              <button
+                type="button"
+                onClick={() => void forceAppUpdate()}
+                className="p-2 rounded-xl text-[#0c4a6e] bg-white/90 hover:bg-white border border-sky-200/80 active:scale-[0.98]"
+                title={`Actualizar app (v${APP_BUILD_ID})`}
+                aria-label="Actualizar aplicación"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+              </button>
               {pwaInstall?.canInstall && (
                 <button
                   type="button"

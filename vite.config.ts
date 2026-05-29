@@ -1,7 +1,13 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
+import { readFileSync } from "fs";
 import { componentTagger } from "lovable-tagger";
+
+const pkg = JSON.parse(readFileSync(path.join(__dirname, "package.json"), "utf8")) as { version: string };
+const appBuildId =
+  process.env.VITE_APP_BUILD_ID?.trim() ||
+  `${pkg.version}-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`;
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
@@ -15,6 +21,7 @@ export default defineConfig(({ mode }) => {
     __SUPABASE_URL__: JSON.stringify(process.env.VITE_SUPABASE_URL || 'https://fqdddcineslaxdkyiksf.supabase.co'),
     __SUPABASE_KEY__: JSON.stringify(process.env.VITE_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_uxi5fOL6TkY5sMf5o9CZUg_8Lb8iOgK'),
     "import.meta.env.VITE_MRV_API_URL": JSON.stringify(mrvApiUrl),
+    "import.meta.env.VITE_APP_BUILD_ID": JSON.stringify(appBuildId),
   },
   server: {
     host: "::",
