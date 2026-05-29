@@ -696,6 +696,7 @@ export default function RoundMonitoringFlow({
       entrevistador: round.entrevistador,
       colaboradores: round.colaboradores,
       item,
+      snapshot: { round, summary, evaluation },
     });
     notifyJornada(stats);
     setRondaRegistrada(true);

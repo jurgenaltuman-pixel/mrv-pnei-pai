@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, ClipboardList } from 'lucide-react';
+import { ChevronDown, ChevronRight, ClipboardList, FileSpreadsheet, FileText, Loader2 } from 'lucide-react';
 import { formatFechaHoraPy } from '@/lib/format-fecha';
+import { downloadRoundHistoryExcel, downloadRoundHistoryPdf } from '@/lib/round-history-report';
+import { useToast } from '@/hooks/use-toast';
 import type { RoundHistoryRow } from '@/services/roundHistoryApi';
 
 function asignacionLabel(r: RoundHistoryRow): string {
@@ -11,14 +13,19 @@ interface Props {
   rows: RoundHistoryRow[];
   groupByUser?: boolean;
   title?: string;
+  /** Usa API admin para descargar detalle de cualquier usuario */
+  adminMode?: boolean;
 }
 
 export default function RoundHistoryAccordion({
   rows,
   groupByUser = false,
   title = 'Historial de rondas',
+  adminMode = false,
 }: Props) {
+  const { toast } = useToast();
   const [openKeys, setOpenKeys] = useState<Set<string>>(new Set());
+  const [exportingId, setExportingId] = useState<string | null>(null);
 
   const groups = useMemo(() => {
     const map = new Map<string, { label: string; sub: string; items: RoundHistoryRow[] }>();
@@ -39,6 +46,30 @@ export default function RoundHistoryAccordion({
       return tb - ta;
     });
   }, [rows, groupByUser]);
+
+  const runExport = async (row: RoundHistoryRow, kind: 'excel' | 'pdf') => {
+    const key = `${row.id}-${kind}`;
+    setExportingId(key);
+    try {
+      if (kind === 'excel') {
+        await downloadRoundHistoryExcel(row, adminMode);
+      } else {
+        await downloadRoundHistoryPdf(row, adminMode);
+      }
+      toast({
+        title: kind === 'excel' ? 'Excel generado' : 'PDF generado',
+        description: row.round_codigo ? `Ronda ${row.round_codigo}` : row.nombre,
+      });
+    } catch (e) {
+      toast({
+        title: 'No se pudo generar el reporte',
+        description: e instanceof Error ? e.message : 'Error desconocido',
+        variant: 'destructive',
+      });
+    } finally {
+      setExportingId(null);
+    }
+  };
 
   if (!rows.length) {
     return (
@@ -87,27 +118,65 @@ export default function RoundHistoryAccordion({
             </button>
             {open && (
               <ul className="divide-y border-t">
-                {g.items.map((r) => (
-                  <li key={r.id || `${r.nombre}-${r.completadaAt}`} className="px-3 py-2 text-xs">
-                    <p className="font-semibold text-foreground">{r.nombre}</p>
-                    {r.round_codigo && (
-                      <p className="text-[10px] font-mono text-muted-foreground">ID {r.round_codigo}</p>
-                    )}
-                    <p className="text-muted-foreground mt-0.5">
-                      {r.efectivas}/{r.totalCasas} E · {r.visitadas} visitas ·{' '}
-                      {r.coberturaVacunacion != null ? `${r.coberturaVacunacion}% cob.` : '— cob.'}
-                      {' · '}
-                      {r.aprobado ? (
-                        <span className="text-success font-semibold">aprobada</span>
-                      ) : (
-                        <span className="text-destructive font-semibold">caída</span>
+                {g.items.map((r) => {
+                  const rowId = r.id || `${r.nombre}-${r.completadaAt}`;
+                  const busyExcel = exportingId === `${rowId}-excel`;
+                  const busyPdf = exportingId === `${rowId}-pdf`;
+                  return (
+                    <li key={rowId} className="px-3 py-2 text-xs">
+                      <p className="font-semibold text-foreground">{r.nombre}</p>
+                      {r.round_codigo && (
+                        <p className="text-[10px] font-mono text-muted-foreground">ID {r.round_codigo}</p>
                       )}
-                    </p>
-                    <p className="text-[10px] text-muted-foreground">
-                      {formatFechaHoraPy(new Date(r.completadaAt))}
-                    </p>
-                  </li>
-                ))}
+                      <p className="text-muted-foreground mt-0.5">
+                        {r.efectivas}/{r.totalCasas} E · {r.visitadas} visitas ·{' '}
+                        {r.coberturaVacunacion != null ? `${r.coberturaVacunacion}% cob.` : '— cob.'}
+                        {' · '}
+                        {r.aprobado ? (
+                          <span className="text-success font-semibold">aprobada</span>
+                        ) : (
+                          <span className="text-destructive font-semibold">caída</span>
+                        )}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {formatFechaHoraPy(new Date(r.completadaAt))}
+                        {!r.has_snapshot && (
+                          <span className="block text-amber-700 dark:text-amber-400 mt-0.5">
+                            Reporte resumido (ronda anterior al detalle guardado)
+                          </span>
+                        )}
+                      </p>
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        <button
+                          type="button"
+                          disabled={Boolean(exportingId)}
+                          onClick={() => void runExport(r, 'excel')}
+                          className="inline-flex items-center gap-1 h-7 px-2 rounded-lg bg-emerald-600/10 text-emerald-800 dark:text-emerald-300 border border-emerald-600/30 text-[10px] font-bold disabled:opacity-50"
+                        >
+                          {busyExcel ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <FileSpreadsheet className="w-3 h-3" />
+                          )}
+                          Excel
+                        </button>
+                        <button
+                          type="button"
+                          disabled={Boolean(exportingId)}
+                          onClick={() => void runExport(r, 'pdf')}
+                          className="inline-flex items-center gap-1 h-7 px-2 rounded-lg bg-primary/10 text-primary border border-primary/30 text-[10px] font-bold disabled:opacity-50"
+                        >
+                          {busyPdf ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <FileText className="w-3 h-3" />
+                          )}
+                          PDF
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>

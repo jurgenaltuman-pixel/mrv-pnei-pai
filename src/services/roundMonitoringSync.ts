@@ -33,7 +33,7 @@ function buildVisitaPayload(
         F: {
           nombre: 'Visita F — fallida',
           doc: 'VISITA-F',
-          motivo: 'Visita F: cerrada con o sin niños / sin responsable',
+          motivo: 'Visita F: cerrada o casa con niños/as de 1 a 5 años, sin responsable',
         },
         R: { nombre: 'Visita R — renuente', doc: 'VISITA-R', motivo: 'Visita R: renuente rechazo' },
       }[casa.estado];

@@ -19,7 +19,7 @@ const GRUPO_BY_CODE: Record<CasaEstadoCode, 'abierta' | 'cerrada'> = {
 const DESCRIPCION_BY_CODE: Record<CasaEstadoCode, string> = {
   E: 'La brigada entró y registró datos del niño elegible (o rechazo con datos).',
   N: 'Puerta cerrada, no hay niños elegibles o no se pudo abordar la vivienda.',
-  F: 'Casa cerrada o sin responsable; puede haber o no niños elegibles en el hogar.',
+  F: 'Cerrada o casa con niños/as de 1 a 5 años, sin responsable.',
   R: 'Había adulto pero se negó a dar información.',
 };
 

@@ -1624,7 +1624,7 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
               <Loader2 className="w-4 h-4 animate-spin" /> Cargando historial…
             </p>
           ) : (
-            <RoundHistoryAccordion rows={roundHistory} groupByUser />
+            <RoundHistoryAccordion rows={roundHistory} groupByUser adminMode />
           )}
         </div>
       )}

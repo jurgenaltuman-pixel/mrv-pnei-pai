@@ -13,7 +13,7 @@ document.documentElement.lang = "es";
 document.documentElement.translate = false;
 
 /** Bump al desplegar si hay que forzar otro barrido (chunks viejos, SW roto). */
-const SW_SWEEP_KEY = "mrv-sw-sweep-2026-05-28-labels-map";
+const SW_SWEEP_KEY = "mrv-sw-sweep-2026-05-28-fallida-historial";
 
 function sweepMarkerIsSet(): boolean {
   try {

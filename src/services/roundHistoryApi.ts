@@ -1,5 +1,13 @@
 import { mrvApiFetch, USE_MRV_API } from '@/lib/api-config';
 import type { RondaHistorialItem } from '@/lib/jornada-storage';
+import type { RoundEvaluation } from '@/lib/round-evaluation';
+import type { RoundMonitoring, RoundSummary } from '@/types/round-monitoring';
+
+export interface RoundHistorySnapshot {
+  round: RoundMonitoring;
+  summary: RoundSummary;
+  evaluation: RoundEvaluation;
+}
 
 export type RoundHistoryRow = RondaHistorialItem & {
   id: string;
@@ -15,6 +23,12 @@ export type RoundHistoryRow = RondaHistorialItem & {
   responsable?: string | null;
   entrevistador?: string | null;
   colaboradores?: string[];
+  /** Detalle guardado al cerrar la ronda (casas, niños, etc.). */
+  has_snapshot?: boolean;
+};
+
+export type RoundHistoryDetail = RoundHistoryRow & {
+  snapshot: RoundHistorySnapshot | null;
 };
 
 export async function saveRoundHistoryToServer(payload: {
@@ -29,6 +43,7 @@ export async function saveRoundHistoryToServer(payload: {
   entrevistador?: string | null;
   colaboradores?: string[];
   item: RondaHistorialItem;
+  snapshot?: RoundHistorySnapshot | null;
 }): Promise<void> {
   if (!USE_MRV_API) return;
   const { error } = await mrvApiFetch('/api/rounds/history', {
@@ -55,9 +70,21 @@ export async function saveRoundHistoryToServer(payload: {
       cobertura_vacunacion: payload.item.coberturaVacunacion,
       aprobado: payload.item.aprobado,
       completada_at: payload.item.completadaAt,
+      snapshot_json: payload.snapshot ?? null,
     }),
   });
   if (error) console.warn('round history sync:', error);
+}
+
+export async function fetchRoundHistoryDetail(
+  id: string,
+  admin = false
+): Promise<{ data: RoundHistoryDetail | null; error: string | null }> {
+  if (!USE_MRV_API) return { data: null, error: 'API no configurada' };
+  const path = admin ? `/api/admin/rounds/history/${id}` : `/api/rounds/history/${id}`;
+  const { data, error } = await mrvApiFetch<{ data: RoundHistoryDetail }>(path);
+  if (error) return { data: null, error };
+  return { data: data?.data ?? null, error: null };
 }
 
 export async function fetchMyRoundHistory(): Promise<RoundHistoryRow[]> {

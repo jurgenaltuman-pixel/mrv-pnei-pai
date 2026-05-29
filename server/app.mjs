@@ -61,6 +61,7 @@ async function ensureRoundHistoryTable() {
   await query(`ALTER TABLE round_monitoring_history ADD COLUMN IF NOT EXISTS responsable text`);
   await query(`ALTER TABLE round_monitoring_history ADD COLUMN IF NOT EXISTS entrevistador text`);
   await query(`ALTER TABLE round_monitoring_history ADD COLUMN IF NOT EXISTS colaboradores_json jsonb`);
+  await query(`ALTER TABLE round_monitoring_history ADD COLUMN IF NOT EXISTS snapshot_json jsonb`);
   roundHistoryTableReady = true;
 }
 
@@ -155,6 +156,7 @@ function mapRoundHistoryRow(row) {
     visitadas: Number(row.visitadas) || 0,
     totalCasas: Number(row.total_casas) || 20,
     completadaAt: completada,
+    has_snapshot: Boolean(row.snapshot_json),
   };
 }
 
@@ -1057,10 +1059,10 @@ export function createApp() {
       const { rows } = await query(
         `INSERT INTO round_monitoring_history (
           user_id, round_local_id, round_codigo, modulo_label, assigned_region, assigned_distrito, assigned_servicio,
-          barrio, responsable, entrevistador, colaboradores_json,
+          barrio, responsable, entrevistador, colaboradores_json, snapshot_json,
           efectivas, no_efectivas, fallidas, renuentes, total_ninos, vacunados, visitadas, total_casas,
           cobertura_vacunacion, aprobado, completada_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
         RETURNING id`,
         [
           req.user.sub,
@@ -1074,6 +1076,7 @@ export function createApp() {
           b.responsable || scope?.display_name || null,
           b.entrevistador || b.responsable || scope?.display_name || null,
           JSON.stringify(Array.isArray(b.colaboradores) ? b.colaboradores : []),
+          b.snapshot_json != null ? JSON.stringify(b.snapshot_json) : null,
           Number(b.efectivas) || 0,
           Number(b.no_efectivas) || 0,
           Number(b.fallidas) || 0,
@@ -1239,6 +1242,66 @@ export function createApp() {
         [req.user.sub, limit]
       );
       res.json({ data: rows.map(mapRoundHistoryRow) });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get('/api/rounds/history/:id', authMiddleware, async (req, res) => {
+    try {
+      await ensureRoundHistoryTable();
+      const { rows } = await query(
+        `SELECT h.*, p.display_name, p.email
+         FROM round_monitoring_history h
+         LEFT JOIN profiles p ON p.user_id = h.user_id
+         WHERE h.id = $1::uuid AND h.user_id = $2`,
+        [req.params.id, req.user.sub]
+      );
+      if (!rows.length) {
+        res.status(404).json({ error: 'Ronda no encontrada' });
+        return;
+      }
+      const row = rows[0];
+      res.json({
+        data: {
+          ...mapRoundHistoryRow(row),
+          snapshot: row.snapshot_json || null,
+        },
+      });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get('/api/admin/rounds/history/:id', authMiddleware, requireAdmin, async (req, res) => {
+    try {
+      await ensureRoundHistoryTable();
+      const { rows } = await query(
+        `SELECT h.*, p.display_name, p.email,
+                p.assigned_region AS profile_region,
+                p.assigned_distrito AS profile_distrito,
+                p.assigned_servicio AS profile_servicio
+         FROM round_monitoring_history h
+         LEFT JOIN profiles p ON p.user_id = h.user_id
+         WHERE h.id = $1::uuid`,
+        [req.params.id]
+      );
+      if (!rows.length) {
+        res.status(404).json({ error: 'Ronda no encontrada' });
+        return;
+      }
+      const row = rows[0];
+      res.json({
+        data: {
+          ...mapRoundHistoryRow({
+            ...row,
+            assigned_region: row.assigned_region || row.profile_region,
+            assigned_distrito: row.assigned_distrito || row.profile_distrito,
+            assigned_servicio: row.assigned_servicio || row.profile_servicio,
+          }),
+          snapshot: row.snapshot_json || null,
+        },
+      });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
