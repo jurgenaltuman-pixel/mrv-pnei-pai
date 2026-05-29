@@ -4,6 +4,7 @@ import type { RoundMonitoring } from '@/types/round-monitoring';
 
 const base = (): RoundMonitoring => ({
   id: '1',
+  codigo: 'R250101-TEST',
   userId: 'u1',
   moduloLabel: 'M1',
   totalCasas: 20,
@@ -18,6 +19,8 @@ const base = (): RoundMonitoring => ({
   servicio: null,
   barrio: '',
   responsable: null,
+  entrevistador: null,
+  colaboradores: [],
   ultimaCasaResumen: null,
 });
 

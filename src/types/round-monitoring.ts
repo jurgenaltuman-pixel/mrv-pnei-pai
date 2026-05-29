@@ -71,6 +71,10 @@ export interface RoundMonitoring {
   servicio: string | null;
   barrio: string;
   responsable: string | null;
+  /** Entrevistador principal (brigadista que inicia la ronda). */
+  entrevistador: string | null;
+  /** Brigadistas adicionales en la misma ronda (misma región/distrito/servicio). */
+  colaboradores: string[];
   ultimaCasaResumen: { numero: number; estado: CasaEstadoCode; ninos: number } | null;
 }
 

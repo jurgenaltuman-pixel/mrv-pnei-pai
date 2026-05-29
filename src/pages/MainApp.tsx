@@ -51,6 +51,8 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase, isSupabaseEnabled } from '@/integrations/supabase/client';
 import { USE_MRV_API, USE_SUPABASE_PADRON, mrvApiFetch, useRegistrosApi } from '@/lib/api-config';
 import RoundMonitoringFlow from '@/components/round/RoundMonitoringFlow';
+import RecentRoundsDock from '@/components/round/RecentRoundsDock';
+import type { RoundMonitoring } from '@/types/round-monitoring';
 import VaccinationSectionMonitoreo from '@/components/mrv/VaccinationSectionMonitoreo';
 import VerificacionSection from '@/components/mrv/VerificacionSection';
 import type { NinoCasa } from '@/types/round-monitoring';
@@ -127,6 +129,16 @@ export default function MainApp() {
   const { regiones, distritos, servicios, getBarriosByDistrito } = useOrgStructure();
   const [tab, setTab] = useState('registro');
   const [pendingCount, setPendingCount] = useState(0);
+  const [resumeRoundId, setResumeRoundId] = useState<string | null>(null);
+  const [roundsDockKey, setRoundsDockKey] = useState(0);
+  const [activeRoundId, setActiveRoundId] = useState<string | null>(null);
+  const padronLookupRef = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    if (!resumeRoundId) return;
+    const t = setTimeout(() => setResumeRoundId(null), 400);
+    return () => clearTimeout(t);
+  }, [resumeRoundId]);
 
   useEffect(() => {
     void offlineCache.getPendingCount().then(setPendingCount);
@@ -582,43 +594,50 @@ export default function MainApp() {
     return () => { active = false; };
   }, [mapsLink]);
 
-  // Buscar persona por CI cuando se ingresa documento
+  // Buscar persona por CI (debounce — evita consultas en cada tecla)
   useEffect(() => {
-    let active = true;
-    async function buscarPersona() {
-      if (!documento.trim() || documento.startsWith('TMP-') || sinDocumento) {
-        return;
-      }
-      let data: PersonaBase | null = null;
-      if (USE_MRV_API && !USE_SUPABASE_PADRON) {
-        const { data: res } = await mrvApiFetch<{ data: Record<string, unknown> | null }>(
-          `/api/padron/by-documento?doc=${encodeURIComponent(documento.trim())}`
-        );
-        data = mapPadronApiPersona(res?.data ?? null);
-      } else if (isSupabaseEnabled) {
-        const { data: row, error } = await supabase
-          .from('base_personas')
-          .select('*')
-          .eq('documento', documento.trim())
-          .maybeSingle();
-        if (error || !row || !active) return;
-        data = mapPadronApiPersona(row) ?? (row as PersonaBase);
-      }
-      if (!data || !active) return;
+    if (padronLookupRef.current) clearTimeout(padronLookupRef.current);
+    const doc = documento.trim();
+    if (!doc || doc.startsWith('TMP-') || sinDocumento) return;
+    const soloDigitos = /^\d+$/.test(doc.replace(/\s/g, ''));
+    if (soloDigitos && doc.replace(/\D/g, '').length < 5) return;
 
-      // Auto-completar campos si se encuentra la persona
-      setNombre(upperText(data.nombre || ''));
-      setFechaNacimiento(resolveFechaNacimientoPersona(data));
-      const sx = resolveSexoPersona(data);
-      if (sx) setSexo(sx);
-      setNombreMadre(data.nombre_madre || '');
-      setDocumentoMadre(data.documento_madre || '');
-      aplicarDatosDesdePersona(data);
-      toast({ title: 'Persona encontrada', description: `Datos de ${data.nombre} completados automáticamente` });
-    }
-    void buscarPersona();
-    return () => { active = false; };
-  }, [documento, sinDocumento]);
+    let active = true;
+    padronLookupRef.current = setTimeout(() => {
+      void (async () => {
+        let data: PersonaBase | null = null;
+        if (USE_MRV_API && !USE_SUPABASE_PADRON) {
+          const { data: res } = await mrvApiFetch<{ data: Record<string, unknown> | null }>(
+            `/api/padron/by-documento?doc=${encodeURIComponent(doc)}`
+          );
+          data = mapPadronApiPersona(res?.data ?? null);
+        } else if (isSupabaseEnabled) {
+          const { data: row, error } = await supabase
+            .from('base_personas')
+            .select('*')
+            .eq('documento', doc)
+            .maybeSingle();
+          if (error || !row || !active) return;
+          data = mapPadronApiPersona(row) ?? (row as PersonaBase);
+        }
+        if (!data || !active) return;
+
+        setNombre(upperText(data.nombre || ''));
+        setFechaNacimiento(resolveFechaNacimientoPersona(data));
+        const sx = resolveSexoPersona(data);
+        if (sx) setSexo(sx);
+        setNombreMadre(data.nombre_madre || '');
+        setDocumentoMadre(data.documento_madre || '');
+        aplicarDatosDesdePersona(data);
+        toast({ title: 'Persona encontrada', description: `Datos de ${data.nombre} completados automáticamente` });
+      })();
+    }, 420);
+
+    return () => {
+      active = false;
+      if (padronLookupRef.current) clearTimeout(padronLookupRef.current);
+    };
+  }, [documento, sinDocumento, aplicarDatosDesdePersona, toast]);
 
   const coordsFromLink = useMemo(
     () => parseCoordsFromMapsLink(mapsResolvedLink || mapsLink),
@@ -1128,9 +1147,13 @@ export default function MainApp() {
 
       <main className="flex-1 min-h-0 w-full max-w-6xl mx-auto pb-app box-border">
         {tab === 'registro' && user && (
-          <div className="p-2.5 sm:p-4 lg:p-6 w-full max-w-6xl mx-auto box-border">
+          <div className="p-2.5 sm:p-4 lg:p-6 pb-28 w-full max-w-6xl mx-auto box-border">
             <RoundMonitoringFlow
                 userId={user.id}
+                entrevistadorNombre={user.nombre || responsable}
+                resumeRoundId={resumeRoundId}
+                onRoundsChanged={() => setRoundsDockKey((k) => k + 1)}
+                onActiveRoundChange={setActiveRoundId}
                 isOnline={isOnline}
                 isAdmin={isAdmin || isSuperAdmin}
                 barrio={barrio}
@@ -1251,6 +1274,19 @@ export default function MainApp() {
           </Suspense>
         )}
       </main>
+
+      {tab === 'registro' && user && (
+        <RecentRoundsDock
+          userId={user.id}
+          activeRoundId={activeRoundId}
+          refreshKey={roundsDockKey}
+          onResume={(r: RoundMonitoring) => {
+            setResumeRoundId(r.id);
+            setTab('registro');
+            setBarrio(r.moduloLabel);
+          }}
+        />
+      )}
 
       <BottomNav active={tab} onChange={setTab} showAdmin={isAdmin} />
     </div>

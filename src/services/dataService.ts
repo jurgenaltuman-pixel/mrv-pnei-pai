@@ -423,7 +423,7 @@ export const dataService = {
         }
       }
 
-      if (!isNumeric && rawTokens.length === 1 && normalized.length >= 3) {
+      if (!isNumeric && rawTokens.length === 1 && normalized.length >= 4) {
         try {
           if (usePadronApi) {
             const { data: apiRes } = await mrvApiFetch<{ data: { documento: string; nombre: string; fecha_nacimiento: string | null }[] }>(

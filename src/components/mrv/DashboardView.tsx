@@ -14,7 +14,12 @@ import { useRole } from '@/hooks/useRole';
 import { useRegistrosQuery } from '@/hooks/useRegistrosQuery';
 import { buildDashboardData } from '@/lib/dashboard-stats';
 import { aggregateRoundsByServicio } from '@/lib/round-dashboard-stats';
-import { fetchAdminRoundHistory, fetchMyRoundHistory } from '@/services/roundHistoryApi';
+import {
+  fetchAdminRoundHistory,
+  fetchMyRoundHistory,
+  type RoundHistoryRow,
+} from '@/services/roundHistoryApi';
+import RoundHistoryAccordion from '@/components/mrv/RoundHistoryAccordion';
 import { contadorDesdeDashboard } from '@/lib/housing-stats';
 import HousingStatsPanel from '@/components/mrv/HousingStatsPanel';
 import type { DashboardData, RegistroMRV } from '@/services/dataService';
@@ -83,7 +88,11 @@ export default function DashboardView() {
   const [regionFilter, setRegionFilter] = useState('todas');
   const [distritoFilter, setDistritoFilter] = useState('todos');
   const [servicioFilter, setServicioFilter] = useState('todos');
+  const [barrioFilter, setBarrioFilter] = useState('todos');
+  const [responsableFilter, setResponsableFilter] = useState('todos');
+  const [roundCodigoFilter, setRoundCodigoFilter] = useState('');
   const [chartMode, setChartMode] = useState<'stacked' | 'coverage'>('stacked');
+  const [roundHistoryRows, setRoundHistoryRows] = useState<RoundHistoryRow[]>([]);
   const [exporting, setExporting] = useState(false);
   const [jornadaStats, setJornadaStats] = useState(() => getJornadaStats(''));
   const [roundsByServicio, setRoundsByServicio] = useState<ReturnType<typeof aggregateRoundsByServicio>>([]);
@@ -100,10 +109,33 @@ export default function DashboardView() {
   useEffect(() => {
     if (!user?.id) return;
     void (async () => {
-      const rows = isAdmin || isSuperAdmin ? await fetchAdminRoundHistory() : await fetchMyRoundHistory();
+      const roundFilters =
+        isAdmin || isSuperAdmin
+          ? {
+              region: regionFilter !== 'todas' ? regionFilter : undefined,
+              distrito: distritoFilter !== 'todos' ? distritoFilter : undefined,
+              servicio: servicioFilter !== 'todos' && servicioFilter !== '_sin_servicio' ? servicioFilter : undefined,
+              responsable: responsableFilter !== 'todos' ? responsableFilter : undefined,
+              roundCodigo: roundCodigoFilter.trim() || undefined,
+            }
+          : undefined;
+      const rows =
+        isAdmin || isSuperAdmin
+          ? await fetchAdminRoundHistory(roundFilters)
+          : await fetchMyRoundHistory();
+      setRoundHistoryRows(rows);
       setRoundsByServicio(aggregateRoundsByServicio(rows));
     })();
-  }, [user?.id, isAdmin, isSuperAdmin]);
+  }, [
+    user?.id,
+    isAdmin,
+    isSuperAdmin,
+    regionFilter,
+    distritoFilter,
+    servicioFilter,
+    responsableFilter,
+    roundCodigoFilter,
+  ]);
 
   useEffect(() => {
     const onVisible = () => {
@@ -152,16 +184,59 @@ export default function DashboardView() {
     );
   }, [registrosPorFecha, regionFilter, distritoFilter]);
 
+  const barriosDisponibles = useMemo(() => {
+    let base = registrosPorFecha;
+    if (regionFilter !== 'todas') base = base.filter((r) => r.region === regionFilter);
+    if (distritoFilter !== 'todos') base = base.filter((r) => r.distrito === distritoFilter);
+    if (servicioFilter !== 'todos' && servicioFilter !== '_sin_servicio') {
+      base = base.filter((r) => (r.servicio?.trim() || '') === servicioFilter);
+    }
+    return Array.from(new Set(base.map((r) => r.barrio?.trim()).filter(Boolean) as string[])).sort(
+      (a, b) => a.localeCompare(b, 'es')
+    );
+  }, [registrosPorFecha, regionFilter, distritoFilter, servicioFilter]);
+
+  const responsablesDisponibles = useMemo(() => {
+    let base = registrosPorFecha;
+    if (regionFilter !== 'todas') base = base.filter((r) => r.region === regionFilter);
+    if (distritoFilter !== 'todos') base = base.filter((r) => r.distrito === distritoFilter);
+    return Array.from(new Set(base.map((r) => r.responsable?.trim()).filter(Boolean) as string[])).sort(
+      (a, b) => a.localeCompare(b, 'es')
+    );
+  }, [registrosPorFecha, regionFilter, distritoFilter]);
+
   const registrosFiltrados = useMemo(
     () =>
       registrosPorFecha.filter((r) => {
         if (regionFilter !== 'todas' && r.region !== regionFilter) return false;
         if (distritoFilter !== 'todos' && r.distrito !== distritoFilter) return false;
-        if (servicioFilter === 'todos') return true;
-        if (servicioFilter === '_sin_servicio') return !r.servicio?.trim();
-        return (r.servicio?.trim() || '') === servicioFilter;
+        if (servicioFilter === 'todos') {
+          /* ok */
+        } else if (servicioFilter === '_sin_servicio') {
+          if (r.servicio?.trim()) return false;
+        } else if ((r.servicio?.trim() || '') !== servicioFilter) {
+          return false;
+        }
+        if (barrioFilter !== 'todos' && (r.barrio?.trim() || '') !== barrioFilter) return false;
+        if (responsableFilter !== 'todos' && (r.responsable?.trim() || '') !== responsableFilter) {
+          return false;
+        }
+        if (roundCodigoFilter.trim()) {
+          const needle = roundCodigoFilter.trim().toLowerCase();
+          const obs = (r.observaciones || '').toLowerCase();
+          if (!obs.includes(needle) && !obs.includes(`ronda ${needle}`)) return false;
+        }
+        return true;
       }),
-    [registrosPorFecha, regionFilter, distritoFilter, servicioFilter]
+    [
+      registrosPorFecha,
+      regionFilter,
+      distritoFilter,
+      servicioFilter,
+      barrioFilter,
+      responsableFilter,
+      roundCodigoFilter,
+    ]
   );
 
   const data = useMemo(() => buildDashboardData(registrosFiltrados), [registrosFiltrados]);
@@ -322,7 +397,7 @@ export default function DashboardView() {
         )}
       </div>
 
-      <div className="dash-filters grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+      <div className="dash-filters grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
         <select
           aria-label="Filtrar por región"
           value={regionFilter}
@@ -370,6 +445,40 @@ export default function DashboardView() {
           ))}
           <option value="_sin_servicio">Sin servicio indicado</option>
         </select>
+        <select
+          aria-label="Filtrar por barrio"
+          value={barrioFilter}
+          onChange={(e) => setBarrioFilter(e.target.value)}
+          className="dash-select"
+        >
+          <option value="todos">Todos los barrios</option>
+          {barriosDisponibles.map((b) => (
+            <option key={b} value={b}>
+              {b}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Filtrar por responsable"
+          value={responsableFilter}
+          onChange={(e) => setResponsableFilter(e.target.value)}
+          className="dash-select"
+        >
+          <option value="todos">Todos los responsables</option>
+          {responsablesDisponibles.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
+        </select>
+        <input
+          type="search"
+          aria-label="Filtrar por ID de ronda"
+          placeholder="ID de ronda (ej. R250527)"
+          value={roundCodigoFilter}
+          onChange={(e) => setRoundCodigoFilter(e.target.value)}
+          className="dash-select"
+        />
         <select
           aria-label="Tipo de gráfico"
           value={chartMode}
@@ -425,6 +534,16 @@ export default function DashboardView() {
         <Suspense fallback={<PageSkeleton rows={2} />}>
           <DashboardCharts data={data} chartMode={chartMode} roundsByServicio={roundsByServicio} />
         </Suspense>
+      )}
+
+      {roundHistoryRows.length > 0 && (
+        <div className="dash-card p-4">
+          <RoundHistoryAccordion
+            rows={roundHistoryRows}
+            groupByUser={usarVistaNacional && (isAdmin || isSuperAdmin)}
+            title="Historial de rondas (servidor)"
+          />
+        </div>
       )}
 
     </div>

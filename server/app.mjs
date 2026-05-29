@@ -57,6 +57,10 @@ async function ensureRoundHistoryTable() {
     `CREATE INDEX IF NOT EXISTS round_history_user_idx ON round_monitoring_history (user_id, completada_at DESC)`
   );
   await query(`ALTER TABLE round_monitoring_history ADD COLUMN IF NOT EXISTS round_codigo text`);
+  await query(`ALTER TABLE round_monitoring_history ADD COLUMN IF NOT EXISTS barrio text`);
+  await query(`ALTER TABLE round_monitoring_history ADD COLUMN IF NOT EXISTS responsable text`);
+  await query(`ALTER TABLE round_monitoring_history ADD COLUMN IF NOT EXISTS entrevistador text`);
+  await query(`ALTER TABLE round_monitoring_history ADD COLUMN IF NOT EXISTS colaboradores_json jsonb`);
   roundHistoryTableReady = true;
 }
 
@@ -67,6 +71,20 @@ function mapRoundHistoryRow(row) {
     user_id: String(row.user_id),
     round_local_id: row.round_local_id,
     round_codigo: row.round_codigo,
+    barrio: row.barrio,
+    responsable: row.responsable,
+    entrevistador: row.entrevistador,
+    colaboradores: (() => {
+      const raw = row.colaboradores_json;
+      if (Array.isArray(raw)) return raw;
+      if (raw && typeof raw === 'object') return raw;
+      if (!raw) return [];
+      try {
+        return JSON.parse(String(raw));
+      } catch {
+        return [];
+      }
+    })(),
     display_name: row.display_name,
     email: row.email,
     assigned_region: row.assigned_region,
@@ -946,9 +964,10 @@ export function createApp() {
       const { rows } = await query(
         `INSERT INTO round_monitoring_history (
           user_id, round_local_id, round_codigo, modulo_label, assigned_region, assigned_distrito, assigned_servicio,
+          barrio, responsable, entrevistador, colaboradores_json,
           efectivas, no_efectivas, fallidas, renuentes, total_ninos, vacunados, visitadas, total_casas,
           cobertura_vacunacion, aprobado, completada_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
         RETURNING id`,
         [
           req.user.sub,
@@ -958,6 +977,10 @@ export function createApp() {
           b.assigned_region || scope?.assigned_region || null,
           b.assigned_distrito || scope?.assigned_distrito || null,
           b.assigned_servicio || scope?.assigned_servicio || null,
+          b.barrio || String(b.modulo_label || '').trim() || null,
+          b.responsable || scope?.display_name || null,
+          b.entrevistador || b.responsable || scope?.display_name || null,
+          JSON.stringify(Array.isArray(b.colaboradores) ? b.colaboradores : []),
           Number(b.efectivas) || 0,
           Number(b.no_efectivas) || 0,
           Number(b.fallidas) || 0,
@@ -1001,6 +1024,39 @@ export function createApp() {
     try {
       await ensureRoundHistoryTable();
       const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
+      const clauses = [];
+      const params = [];
+      let idx = 1;
+      const region = String(req.query.region || '').trim();
+      const distrito = String(req.query.distrito || '').trim();
+      const servicio = String(req.query.servicio || '').trim();
+      const responsable = String(req.query.responsable || '').trim();
+      const roundCodigo = String(req.query.round_codigo || '').trim();
+      if (region) {
+        clauses.push(`COALESCE(h.assigned_region, p.assigned_region) ILIKE $${idx++}`);
+        params.push(`%${region}%`);
+      }
+      if (distrito) {
+        clauses.push(`COALESCE(h.assigned_distrito, p.assigned_distrito) ILIKE $${idx++}`);
+        params.push(`%${distrito}%`);
+      }
+      if (servicio) {
+        clauses.push(`COALESCE(h.assigned_servicio, p.assigned_servicio) ILIKE $${idx++}`);
+        params.push(`%${servicio}%`);
+      }
+      if (responsable) {
+        clauses.push(
+          `(h.responsable ILIKE $${idx} OR h.entrevistador ILIKE $${idx} OR p.display_name ILIKE $${idx})`
+        );
+        params.push(`%${responsable}%`);
+        idx++;
+      }
+      if (roundCodigo) {
+        clauses.push(`h.round_codigo ILIKE $${idx++}`);
+        params.push(`%${roundCodigo}%`);
+      }
+      const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+      params.push(limit);
       const { rows } = await query(
         `SELECT h.*, p.display_name, p.email,
                 p.assigned_region AS profile_region,
@@ -1008,9 +1064,10 @@ export function createApp() {
                 p.assigned_servicio AS profile_servicio
          FROM round_monitoring_history h
          LEFT JOIN profiles p ON p.user_id = h.user_id
+         ${where}
          ORDER BY h.completada_at DESC
-         LIMIT $1`,
-        [limit]
+         LIMIT $${idx}`,
+        params
       );
       res.json({
         data: rows.map((r) =>

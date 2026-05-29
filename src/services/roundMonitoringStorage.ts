@@ -72,6 +72,8 @@ export function crearRondaVacia(params: {
   servicio: string | null;
   barrio: string;
   responsable: string | null;
+  entrevistador?: string | null;
+  colaboradores?: string[];
 }): RoundMonitoring {
   const total = params.totalCasas ?? getRoundConfig().casasPorModulo;
   const now = Date.now();
@@ -92,6 +94,8 @@ export function crearRondaVacia(params: {
     servicio: params.servicio,
     barrio: params.barrio,
     responsable: params.responsable,
+    entrevistador: params.entrevistador?.trim() || params.responsable?.trim() || null,
+    colaboradores: (params.colaboradores || []).map((s) => s.trim()).filter(Boolean),
     ultimaCasaResumen: null,
   };
 }

@@ -5,13 +5,14 @@ import { Home } from 'lucide-react';
 
 interface Props {
   moduloLabel?: string;
+  roundCodigo?: string;
   casas: CasaMonitoreo[];
   totalCasas: number;
   /** Vista más compacta en tarjeta «Continuar ronda». */
   compact?: boolean;
 }
 
-function RoundProgressPanel({ moduloLabel, casas, totalCasas, compact }: Props) {
+function RoundProgressPanel({ moduloLabel, roundCodigo, casas, totalCasas, compact }: Props) {
   const summary = useMemo(() => computeRoundSummary(casas, totalCasas), [casas, totalCasas]);
   const pct =
     totalCasas > 0 ? Math.min(100, Math.round((summary.efectivas / totalCasas) * 100)) : 0;
@@ -29,6 +30,9 @@ function RoundProgressPanel({ moduloLabel, casas, totalCasas, compact }: Props) 
           <div className="min-w-0">
             {moduloLabel && (
               <p className="text-xs font-bold text-foreground truncate">Ronda: {moduloLabel}</p>
+            )}
+            {roundCodigo && (
+              <p className="text-[10px] font-mono text-muted-foreground">ID {roundCodigo}</p>
             )}
             <p className="text-[11px] text-muted-foreground">
               <span className="text-success font-bold">{summary.efectivas}</span>

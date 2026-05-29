@@ -17,8 +17,17 @@ export function etiquetaRondaEnObservaciones(codigo: string, casaNumero?: number
 
 /** Asegura codigo en rondas guardadas antes de introducir el campo. */
 export function ensureRoundCodigo(round: RoundMonitoring): RoundMonitoring {
-  if (round.codigo?.trim()) return round;
-  return { ...round, codigo: generarCodigoRonda() };
+  let r = round;
+  if (!round.codigo?.trim()) {
+    r = { ...r, codigo: generarCodigoRonda() };
+  }
+  if (r.entrevistador === undefined) {
+    r = { ...r, entrevistador: r.responsable?.trim() || null };
+  }
+  if (!Array.isArray(r.colaboradores)) {
+    r = { ...r, colaboradores: [] };
+  }
+  return r;
 }
 
 export function formatRoundCodigoDisplay(round: Pick<RoundMonitoring, 'codigo' | 'id'>): string {

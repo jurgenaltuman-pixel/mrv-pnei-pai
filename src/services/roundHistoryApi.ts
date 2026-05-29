@@ -11,6 +11,10 @@ export type RoundHistoryRow = RondaHistorialItem & {
   assigned_servicio?: string | null;
   round_local_id?: string | null;
   round_codigo?: string | null;
+  barrio?: string | null;
+  responsable?: string | null;
+  entrevistador?: string | null;
+  colaboradores?: string[];
 };
 
 export async function saveRoundHistoryToServer(payload: {
@@ -20,6 +24,10 @@ export async function saveRoundHistoryToServer(payload: {
   region: string;
   distrito: string;
   servicio: string | null;
+  barrio?: string;
+  responsable?: string | null;
+  entrevistador?: string | null;
+  colaboradores?: string[];
   item: RondaHistorialItem;
 }): Promise<void> {
   if (!USE_MRV_API) return;
@@ -32,6 +40,10 @@ export async function saveRoundHistoryToServer(payload: {
       assigned_region: payload.region,
       assigned_distrito: payload.distrito,
       assigned_servicio: payload.servicio,
+      barrio: payload.barrio || payload.moduloLabel,
+      responsable: payload.responsable || null,
+      entrevistador: payload.entrevistador || null,
+      colaboradores: payload.colaboradores || [],
       efectivas: payload.item.efectivas,
       no_efectivas: payload.item.noEfectivas,
       fallidas: payload.item.fallidas,
@@ -55,9 +67,25 @@ export async function fetchMyRoundHistory(): Promise<RoundHistoryRow[]> {
   return data.data;
 }
 
-export async function fetchAdminRoundHistory(): Promise<RoundHistoryRow[]> {
+export async function fetchAdminRoundHistory(filters?: {
+  region?: string;
+  distrito?: string;
+  servicio?: string;
+  responsable?: string;
+  roundCodigo?: string;
+  limit?: number;
+}): Promise<RoundHistoryRow[]> {
   if (!USE_MRV_API) return [];
-  const { data, error } = await mrvApiFetch<{ data: RoundHistoryRow[] }>('/api/admin/rounds/history?limit=500');
+  const q = new URLSearchParams();
+  q.set('limit', String(filters?.limit ?? 500));
+  if (filters?.region) q.set('region', filters.region);
+  if (filters?.distrito) q.set('distrito', filters.distrito);
+  if (filters?.servicio) q.set('servicio', filters.servicio);
+  if (filters?.responsable) q.set('responsable', filters.responsable);
+  if (filters?.roundCodigo) q.set('round_codigo', filters.roundCodigo);
+  const { data, error } = await mrvApiFetch<{ data: RoundHistoryRow[] }>(
+    `/api/admin/rounds/history?${q.toString()}`
+  );
   if (error || !data?.data) return [];
   return data.data;
 }

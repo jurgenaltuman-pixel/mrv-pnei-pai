@@ -39,6 +39,10 @@ interface LocationContext {
 
 interface Props {
   userId: string;
+  entrevistadorNombre?: string | null;
+  resumeRoundId?: string | null;
+  onRoundsChanged?: () => void;
+  onActiveRoundChange?: (roundId: string | null) => void;
   isOnline: boolean;
   isAdmin?: boolean;
   location: LocationContext;
@@ -95,6 +99,10 @@ function normalizarRondaParaMetaEfectivas(r: RoundMonitoring): RoundMonitoring {
 
 export default function RoundMonitoringFlow({
   userId,
+  entrevistadorNombre = null,
+  resumeRoundId = null,
+  onRoundsChanged,
+  onActiveRoundChange,
   isOnline,
   isAdmin = false,
   location,
@@ -124,6 +132,30 @@ export default function RoundMonitoringFlow({
   const [estadoDraft, setEstadoDraft] = useState<CasaEstadoCode | null>(null);
   const [saving, setSaving] = useState(false);
   const [rondaRegistrada, setRondaRegistrada] = useState(false);
+  const [colaboradores, setColaboradores] = useState<string[]>([]);
+
+  useEffect(() => {
+    onActiveRoundChange?.(round?.id ?? null);
+  }, [round?.id, onActiveRoundChange]);
+
+  useEffect(() => {
+    if (!resumeRoundId) return;
+    void (async () => {
+      const rows = await roundMonitoringStorage.listByUser(userId, 30);
+      const target = rows.find((r) => r.id === resumeRoundId);
+      if (!target) return;
+      undismissRound(userId, target.id);
+      const r = normalizarRondaParaMetaEfectivas(target);
+      setRound(r);
+      setBarrio(r.moduloLabel);
+      setColaboradores(r.colaboradores || []);
+      setSavedRound(null);
+      setEstadoDraft(null);
+      void roundMonitoringStorage.save(r);
+      onRoundsChanged?.();
+      toast({ title: 'Ronda reanudada', description: `${r.moduloLabel} · ID ${r.codigo}` });
+    })();
+  }, [resumeRoundId, userId, setBarrio, onRoundsChanged, toast]);
 
   useEffect(() => {
     let cancelled = false;
@@ -218,7 +250,8 @@ export default function RoundMonitoringFlow({
     const normalized = ensureRoundCodigo(r);
     setRound(normalized);
     await roundMonitoringStorage.save(normalized);
-  }, []);
+    onRoundsChanged?.();
+  }, [onRoundsChanged]);
 
   const notifyJornada = useCallback(
     (stats: JornadaStats) => {
@@ -297,6 +330,8 @@ export default function RoundMonitoringFlow({
       servicio: location.servicioNombre || null,
       barrio: nombre,
       responsable: location.responsable,
+      entrevistador: entrevistadorNombre || location.responsable,
+      colaboradores,
     });
     r.fase = 'croquis';
     setRondaRegistrada(false);
@@ -527,6 +562,10 @@ export default function RoundMonitoringFlow({
       region: round.region,
       distrito: round.distrito,
       servicio: round.servicio,
+      barrio: round.barrio,
+      responsable: round.responsable,
+      entrevistador: round.entrevistador,
+      colaboradores: round.colaboradores,
       item,
     });
     notifyJornada(stats);
@@ -563,8 +602,19 @@ export default function RoundMonitoringFlow({
           barrio={barrio}
           setBarrio={setBarrio}
           barriosDisponibles={barriosDisponibles}
+          regionNombre={location.regionNombre}
           distritoNombre={location.distritoNombre}
           servicioNombre={location.servicioNombre}
+          entrevistadorNombre={entrevistadorNombre || location.responsable}
+          colaboradores={colaboradores}
+          onAddColaborador={(nombre) => {
+            const n = nombre.trim();
+            if (!n || colaboradores.includes(n)) return;
+            setColaboradores((prev) => [...prev, n]);
+          }}
+          onRemoveColaborador={(nombre) => {
+            setColaboradores((prev) => prev.filter((c) => c !== nombre));
+          }}
           onStart={() => void handleStart()}
           canStart={canStart}
           loadingResume={loadingResume}
@@ -582,6 +632,7 @@ export default function RoundMonitoringFlow({
     round && round.fase !== 'summary' ? (
       <RoundProgressPanel
         moduloLabel={round.moduloLabel}
+        roundCodigo={round.codigo}
         casas={round.casas}
         totalCasas={round.totalCasas}
       />
@@ -592,6 +643,7 @@ export default function RoundMonitoringFlow({
       <div className="mrv-flow-container">
         <RoundProgressPanel
           moduloLabel={round.moduloLabel}
+          roundCodigo={round.codigo}
           casas={round.casas}
           totalCasas={round.totalCasas}
           compact

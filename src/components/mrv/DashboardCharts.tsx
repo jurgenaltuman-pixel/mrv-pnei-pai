@@ -5,6 +5,15 @@ import type { RoundServicioStats } from '@/lib/round-dashboard-stats';
 
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement);
 
+const lightChartOpts = {
+  responsive: true,
+  maintainAspectRatio: false,
+  animation: { duration: 280 },
+  plugins: {
+    legend: { position: 'bottom' as const, labels: { boxWidth: 10, font: { size: 10 }, padding: 8 } },
+  },
+};
+
 interface Props {
   data: DashboardData;
   chartMode: 'stacked' | 'coverage';
@@ -39,11 +48,7 @@ export default function DashboardCharts({ data, chartMode, roundsByServicio = []
                   borderWidth: 0,
                 }],
               }}
-              options={{
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } } },
-              }}
+              options={lightChartOpts}
             />
           </div>
         </div>
@@ -59,11 +64,7 @@ export default function DashboardCharts({ data, chartMode, roundsByServicio = []
                   borderWidth: 0,
                 }],
               }}
-              options={{
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } } },
-              }}
+              options={lightChartOpts}
             />
           </div>
         </div>

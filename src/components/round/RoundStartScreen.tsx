@@ -3,15 +3,20 @@ import { upperText } from '@/lib/text-uppercase';
 import type { RoundMonitoring } from '@/types/round-monitoring';
 import { formatRoundCodigoDisplay } from '@/lib/round-codigo';
 import RoundProgressPanel from '@/components/round/RoundProgressPanel';
-import { Grid3x3, Play, RotateCcw, Trash2 } from 'lucide-react';
+import { Grid3x3, Play, Plus, RotateCcw, Trash2, UserPlus, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 interface Props {
   barrio: string;
   setBarrio: (v: string) => void;
   barriosDisponibles: string[];
+  regionNombre?: string;
   distritoNombre: string;
   servicioNombre?: string | null;
+  entrevistadorNombre?: string | null;
+  colaboradores: string[];
+  onAddColaborador: (nombre: string) => void;
+  onRemoveColaborador: (nombre: string) => void;
   onStart: () => void;
   canStart: boolean;
   loadingResume?: boolean;
@@ -26,8 +31,13 @@ export default function RoundStartScreen({
   barrio,
   setBarrio,
   barriosDisponibles,
+  regionNombre,
   distritoNombre,
   servicioNombre,
+  entrevistadorNombre,
+  colaboradores,
+  onAddColaborador,
+  onRemoveColaborador,
   onStart,
   canStart,
   loadingResume,
@@ -39,6 +49,7 @@ export default function RoundStartScreen({
 }: Props) {
   const cfg = getRoundConfig();
   const [manualBarrio, setManualBarrio] = useState(false);
+  const [colaboradorInput, setColaboradorInput] = useState('');
   const barriosOrdenados = useMemo(
     () => [...barriosDisponibles].sort((a, b) => a.localeCompare(b, 'es')),
     [barriosDisponibles]
@@ -90,6 +101,7 @@ export default function RoundStartScreen({
           <p className="text-[10px] font-mono text-muted-foreground">ID {formatRoundCodigoDisplay(savedRound)}</p>
           <RoundProgressPanel
             moduloLabel={savedRound.moduloLabel}
+            roundCodigo={formatRoundCodigoDisplay(savedRound)}
             casas={savedRound.casas}
             totalCasas={savedRound.totalCasas}
             compact
@@ -158,13 +170,78 @@ export default function RoundStartScreen({
         ))}
         <option value="__OTHER__">Otro (escribir manual)</option>
       </select>
-      {servicioNombre ? (
+      {(regionNombre || distritoNombre || servicioNombre) && (
         <p className="text-[10px] text-muted-foreground mb-2">
-          Distrito: {distritoNombre} · Servicio: {servicioNombre}
+          {[regionNombre, distritoNombre, servicioNombre].filter(Boolean).join(' · ')}
         </p>
-      ) : distritoNombre ? (
-        <p className="text-[10px] text-muted-foreground mb-2">Distrito: {distritoNombre}</p>
-      ) : null}
+      )}
+      {entrevistadorNombre && (
+        <p className="text-[10px] text-muted-foreground mb-3">
+          Entrevistador: <span className="font-semibold text-foreground">{entrevistadorNombre}</span>
+        </p>
+      )}
+
+      <div className="mb-5 rounded-xl border border-border bg-muted/20 p-3 space-y-2">
+        <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground flex items-center gap-1">
+          <UserPlus className="w-3.5 h-3.5" />
+          Brigadistas en esta ronda
+        </p>
+        <p className="text-[10px] text-muted-foreground">
+          Misma región, distrito y servicio. Se incluyen en el informe PDF/Excel.
+        </p>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            className="flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm min-h-[40px]"
+            placeholder="Nombre del brigadista"
+            value={colaboradorInput}
+            onChange={(e) => setColaboradorInput(upperText(e.target.value))}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                const n = colaboradorInput.trim();
+                if (n) {
+                  onAddColaborador(n);
+                  setColaboradorInput('');
+                }
+              }
+            }}
+          />
+          <button
+            type="button"
+            className="shrink-0 h-10 w-10 rounded-lg bg-primary text-primary-foreground flex items-center justify-center"
+            onClick={() => {
+              const n = colaboradorInput.trim();
+              if (!n) return;
+              onAddColaborador(n);
+              setColaboradorInput('');
+            }}
+            aria-label="Añadir brigadista"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+        </div>
+        {colaboradores.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {colaboradores.map((c) => (
+              <span
+                key={c}
+                className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary px-2.5 py-1 text-[11px] font-semibold"
+              >
+                {c}
+                <button
+                  type="button"
+                  onClick={() => onRemoveColaborador(c)}
+                  className="hover:text-destructive"
+                  aria-label={`Quitar ${c}`}
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
       {(mostrarManual || sinCatalogo) && (
         <input
           type="text"

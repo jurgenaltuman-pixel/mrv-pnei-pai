@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import type { RegistroMRV } from '@/services/dataService';
 import { formatFechaHoraPy, formatFechaPy } from '@/lib/format-fecha';
+import { appendMetaSheet, jsonSheetWithCols } from '@/lib/xlsx-report-utils';
 
 const CAMBIO_TAG = '[Cambio de residencia]';
 
@@ -155,20 +156,9 @@ export function downloadRegistrosExcel(
 ) {
   const rows = registros.map(registroToExcelRow);
   const wb = XLSX.utils.book_new();
-
-  const ws = XLSX.utils.json_to_sheet(rows);
-  if (rows.length > 0) {
-    const headers = Object.keys(rows[0]);
-    ws['!cols'] = headers.map((h) => ({
-      wch: Math.min(
-        48,
-        Math.max(10, h.length + 2, ...rows.slice(0, 50).map((r) => String((r as Record<string, string>)[h] ?? '').length))
-      ),
-    }));
-  }
-  XLSX.utils.book_append_sheet(wb, ws, 'Registros');
-
-  const metaRows = [
+  jsonSheetWithCols(wb, rows, 'Registros');
+  appendMetaSheet(wb, [
+    { campo: 'sistema', valor: 'MRV — Monitoreo Rápido de Vacunación' },
     { campo: 'generado', valor: formatFechaHoraPy(new Date()) },
     { campo: 'total_filas', valor: String(meta?.total ?? registros.length) },
     {
@@ -179,8 +169,7 @@ export function downloadRegistrosExcel(
     },
     { campo: 'latitud', valor: 'Grados decimales (-90 a 90)' },
     { campo: 'longitud', valor: 'Grados decimales (-180 a 180)' },
-  ];
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(metaRows), 'Info');
+  ]);
 
   XLSX.writeFile(wb, `${filenamePrefix}_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
