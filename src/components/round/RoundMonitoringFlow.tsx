@@ -27,6 +27,15 @@ import * as adminApi from '@/services/adminApi';
 import CasaGuardadaEditor from './CasaGuardadaEditor';
 import { downloadRoundReportExcel, downloadRoundReportPdf } from '@/lib/export-round-report';
 import { saveRoundHistoryToServer } from '@/services/roundHistoryApi';
+import {
+  deleteRoundDraftOnServer,
+  syncRoundDraftToServer,
+} from '@/services/roundDraftApi';
+import {
+  countActiveRounds,
+  MAX_ACTIVE_ROUNDS_PER_USER,
+} from '@/lib/round-active-limit';
+import type { EquipoMiembro } from '@/components/round/RoundEquipoUsuarios';
 import type { CasaEstadoCode, CasaMonitoreo, NinoCasa, RoundMonitoring } from '@/types/round-monitoring';
 import RoundStartScreen from './RoundStartScreen';
 import CroquisMap from './CroquisMap';
@@ -67,6 +76,13 @@ interface Props {
   editingNinoId?: string | null;
   onPendingSync?: () => void;
   onJornadaUpdate?: (stats: JornadaStats) => void;
+}
+
+function equipoToRoundFields(equipo: EquipoMiembro[]) {
+  return {
+    colaboradores: equipo.map((e) => e.display_name.trim()).filter(Boolean),
+    colaboradorUserIds: equipo.map((e) => e.user_id).filter(Boolean),
+  };
 }
 
 function normalizarRondaParaMetaEfectivas(r: RoundMonitoring): RoundMonitoring {
@@ -137,7 +153,26 @@ export default function RoundMonitoringFlow({
   const [estadoDraft, setEstadoDraft] = useState<CasaEstadoCode | null>(null);
   const [saving, setSaving] = useState(false);
   const [rondaRegistrada, setRondaRegistrada] = useState(false);
-  const [colaboradores, setColaboradores] = useState<string[]>([]);
+  const [equipoUsuarios, setEquipoUsuarios] = useState<EquipoMiembro[]>([]);
+  const [activeDrafts, setActiveDrafts] = useState<RoundMonitoring[]>([]);
+
+  const applyEquipoFromRound = useCallback((r: RoundMonitoring) => {
+    const ids = r.colaboradorUserIds || [];
+    const names = r.colaboradores || [];
+    const members: EquipoMiembro[] = names.map((display_name, i) => ({
+      user_id: ids[i] || `legacy-${i}-${display_name}`,
+      display_name,
+    }));
+    setEquipoUsuarios(members);
+  }, []);
+
+  const refreshActiveDrafts = useCallback(async () => {
+    const drafts = await roundMonitoringStorage.listActiveDraftsForUser(userId);
+    setActiveDrafts(drafts);
+    const primary = drafts[0] ?? null;
+    setSavedRound(primary);
+    setRecoverableRounds(drafts.filter((r) => r.id !== primary?.id));
+  }, [userId]);
 
   useEffect(() => {
     onActiveRoundChange?.(round?.id ?? null);
@@ -153,7 +188,7 @@ export default function RoundMonitoringFlow({
       const r = normalizarRondaParaMetaEfectivas(target);
       setRound(r);
       setBarrio(r.moduloLabel);
-      setColaboradores(r.colaboradores || []);
+      applyEquipoFromRound(r);
       setSavedRound(null);
       setEstadoDraft(null);
       void roundMonitoringStorage.save(r);
@@ -167,28 +202,13 @@ export default function RoundMonitoringFlow({
     void (async () => {
       setLoadingResume(true);
       try {
-        let active = await roundMonitoringStorage.getActiveForUser(userId);
-        const todas = await roundMonitoringStorage.listResumableForUser(userId, {
-          includeDismissed: true,
-        });
-        if (!active) {
-          const recuperable = todas.find((r) => rondaIncompleta(r));
-          if (recuperable) {
-            undismissRound(userId, recuperable.id);
-            active = recuperable;
-            if (!cancelled) {
-              toast({
-                title: 'Ronda recuperada',
-                description: `«${recuperable.moduloLabel}» sigue en este dispositivo. Tocá Continuar ronda.`,
-              });
-            }
-          }
-        }
+        await roundMonitoringStorage.syncDraftsFromServer(userId);
+        const drafts = await roundMonitoringStorage.listActiveDraftsForUser(userId);
         if (!cancelled) {
-          setSavedRound(active);
-          setRecoverableRounds(
-            todas.filter((r) => r.id !== active?.id && rondaIncompleta(r))
-          );
+          setActiveDrafts(drafts);
+          const primary = drafts[0] ?? null;
+          setSavedRound(primary);
+          setRecoverableRounds(drafts.filter((r) => r.id !== primary?.id));
         }
       } finally {
         if (!cancelled) setLoadingResume(false);
@@ -251,12 +271,24 @@ export default function RoundMonitoringFlow({
     return null;
   }, [casaActual, estadoDraft]);
 
-  const persist = useCallback(async (r: RoundMonitoring) => {
-    const normalized = ensureRoundCodigo(r);
-    setRound(normalized);
-    await roundMonitoringStorage.save(normalized);
-    onRoundsChanged?.();
-  }, [onRoundsChanged]);
+  const persist = useCallback(
+    async (r: RoundMonitoring) => {
+      const normalized = ensureRoundCodigo({
+        ...r,
+        userId,
+        ...equipoToRoundFields(equipoUsuarios),
+      });
+      setRound(normalized);
+      await roundMonitoringStorage.save(normalized);
+      const syncErr = await syncRoundDraftToServer(normalized);
+      if (syncErr) {
+        console.warn('round draft sync:', syncErr);
+      }
+      onRoundsChanged?.();
+      await refreshActiveDrafts();
+    },
+    [userId, equipoUsuarios, onRoundsChanged, refreshActiveDrafts]
+  );
 
   const notifyJornada = useCallback(
     (stats: JornadaStats) => {
@@ -270,6 +302,7 @@ export default function RoundMonitoringFlow({
     setSavedRound(r);
     setRecoverableRounds((prev) => prev.filter((x) => x.id !== r.id));
     setBarrio(r.moduloLabel);
+    applyEquipoFromRound(r);
     toast({
       title: 'Ronda lista para continuar',
       description: r.moduloLabel,
@@ -282,6 +315,7 @@ export default function RoundMonitoringFlow({
     const r = normalizarRondaParaMetaEfectivas(savedRound);
     setRound(r);
     setBarrio(r.moduloLabel);
+    applyEquipoFromRound(r);
     setEstadoDraft(null);
     setRondaRegistrada(r.fase === 'summary' && countCasasEfectivas(r.casas) >= r.totalCasas);
     setSavedRound(null);
@@ -304,7 +338,9 @@ export default function RoundMonitoringFlow({
     );
     if (!ok) return;
     dismissRound(userId, savedRound.id);
+    void deleteRoundDraftOnServer(savedRound.id);
     setSavedRound(null);
+    void refreshActiveDrafts();
     toast({ title: 'Ronda descartada' });
   };
 
@@ -317,16 +353,35 @@ export default function RoundMonitoringFlow({
       });
       return;
     }
-    if (savedRound && savedRound.completedAt == null) {
+    const drafts = await roundMonitoringStorage.listActiveDraftsForUser(userId);
+    if (countActiveRounds(drafts) >= MAX_ACTIVE_ROUNDS_PER_USER) {
+      if (savedRound && savedRound.completedAt == null) {
+        const ok = window.confirm(
+          `Ya tenés ${MAX_ACTIVE_ROUNDS_PER_USER} rondas activas. ¿Descartar «${savedRound.moduloLabel}» para abrir una nueva?`
+        );
+        if (!ok) return;
+        dismissRound(userId, savedRound.id);
+        void deleteRoundDraftOnServer(savedRound.id);
+      } else {
+        toast({
+          title: `Máximo ${MAX_ACTIVE_ROUNDS_PER_USER} rondas activas`,
+          description: 'Concluí o descartá una ronda antes de iniciar otra.',
+          variant: 'destructive',
+        });
+        return;
+      }
+    } else if (savedRound && savedRound.completedAt == null) {
       const ok = window.confirm(
-        `Tenés la ronda «${savedRound.moduloLabel}» sin terminar. ¿Iniciar una nueva? La anterior quedará descartada en este equipo.`
+        `Tenés la ronda «${savedRound.moduloLabel}» sin terminar. ¿Iniciar una nueva? La anterior quedará descartada.`
       );
       if (!ok) return;
       dismissRound(userId, savedRound.id);
+      void deleteRoundDraftOnServer(savedRound.id);
       setSavedRound(null);
       setRecoverableRounds([]);
     }
     const nombre = barrio.trim();
+    const eq = equipoToRoundFields(equipoUsuarios);
     const r = crearRondaVacia({
       userId,
       moduloLabel: nombre,
@@ -336,7 +391,8 @@ export default function RoundMonitoringFlow({
       barrio: nombre,
       responsable: location.responsable,
       entrevistador: entrevistadorNombre || location.responsable,
-      colaboradores,
+      colaboradores: eq.colaboradores,
+      colaboradorUserIds: eq.colaboradorUserIds,
     });
     r.fase = 'croquis';
     setRondaRegistrada(false);
@@ -627,6 +683,7 @@ export default function RoundMonitoringFlow({
       const efectivas = countCasasEfectivas(round.casas);
       if (efectivas >= round.totalCasas) {
         dismissRound(userId, round.id);
+        void deleteRoundDraftOnServer(round.id);
       }
     }
     setRound(null);
@@ -656,14 +713,15 @@ export default function RoundMonitoringFlow({
           distritoNombre={location.distritoNombre}
           servicioNombre={location.servicioNombre}
           entrevistadorNombre={entrevistadorNombre || location.responsable}
-          colaboradores={colaboradores}
-          onAddColaborador={(nombre) => {
-            const n = nombre.trim();
-            if (!n || colaboradores.includes(n)) return;
-            setColaboradores((prev) => [...prev, n]);
-          }}
-          onRemoveColaborador={(nombre) => {
-            setColaboradores((prev) => prev.filter((c) => c !== nombre));
+          colaboradores={equipoUsuarios}
+          maxActiveRounds={MAX_ACTIVE_ROUNDS_PER_USER}
+          activeDrafts={activeDrafts}
+          onToggleEquipo={(m) => {
+            setEquipoUsuarios((prev) => {
+              const on = prev.some((x) => x.user_id === m.user_id);
+              if (on) return prev.filter((x) => x.user_id !== m.user_id);
+              return [...prev, m];
+            });
           }}
           onStart={() => void handleStart()}
           canStart={canStart}

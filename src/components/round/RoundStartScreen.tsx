@@ -5,7 +5,7 @@ import { formatRoundCodigoDisplay } from '@/lib/round-codigo';
 import RoundProgressPanel from '@/components/round/RoundProgressPanel';
 import { Grid3x3, Play, RotateCcw, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import RoundEquipoUsuarios from '@/components/round/RoundEquipoUsuarios';
+import RoundEquipoUsuarios, { type EquipoMiembro } from '@/components/round/RoundEquipoUsuarios';
 
 interface Props {
   barrio: string;
@@ -15,9 +15,10 @@ interface Props {
   distritoNombre: string;
   servicioNombre?: string | null;
   entrevistadorNombre?: string | null;
-  colaboradores: string[];
-  onAddColaborador: (nombre: string) => void;
-  onRemoveColaborador: (nombre: string) => void;
+  colaboradores: EquipoMiembro[];
+  onToggleEquipo: (miembro: EquipoMiembro) => void;
+  maxActiveRounds: number;
+  activeDrafts?: RoundMonitoring[];
   onStart: () => void;
   canStart: boolean;
   loadingResume?: boolean;
@@ -37,8 +38,9 @@ export default function RoundStartScreen({
   servicioNombre,
   entrevistadorNombre,
   colaboradores,
-  onAddColaborador,
-  onRemoveColaborador,
+  onToggleEquipo,
+  maxActiveRounds,
+  activeDrafts = [],
   onStart,
   canStart,
   loadingResume,
@@ -62,21 +64,42 @@ export default function RoundStartScreen({
   const selectValue = mostrarManual ? '__OTHER__' : barrio;
   const sinCatalogo = distritoNombre && barriosOrdenados.length === 0;
 
+  const otrasActivas = useMemo(() => {
+    const ids = new Set<string>();
+    if (savedRound?.id) ids.add(savedRound.id);
+    return [
+      ...(savedRound ? [] : []),
+      ...recoverableRounds.filter((r) => !ids.has(r.id)),
+    ];
+  }, [recoverableRounds, savedRound]);
+
   return (
     <div className="mrv-hero-card">
       {loadingResume && (
-        <p className="text-xs text-muted-foreground mb-4 animate-pulse">Buscando ronda guardada…</p>
+        <p className="text-xs text-muted-foreground mb-4 animate-pulse">Sincronizando rondas…</p>
       )}
-      {!savedRound && recoverableRounds.length > 0 && onRecoverRound && (
+
+      {activeDrafts.length > 0 && (
+        <p className="text-[10px] text-muted-foreground mb-3">
+          Rondas activas en tu cuenta:{' '}
+          <strong>
+            {activeDrafts.length}/{maxActiveRounds}
+          </strong>{' '}
+          (se guardan en la nube y aparecen en cualquier dispositivo).
+        </p>
+      )}
+
+      {!savedRound && otrasActivas.length > 0 && onRecoverRound && (
         <div className="mb-5 rounded-2xl border-2 border-warning/50 bg-warning/10 p-4 space-y-2">
           <p className="text-[11px] font-bold uppercase tracking-wide text-warning">
-            Ronda guardada en este equipo
+            Otras rondas activas
           </p>
-          <p className="text-xs text-muted-foreground">
-            Los avances no se borran solos; a veces quedan ocultos al cerrar pantalla o iniciar otra ronda.
-          </p>
-          {recoverableRounds.map((r) => {
+          {otrasActivas.map((r) => {
             const eff = r.casas.filter((c) => c.guardada && c.estado === 'E').length;
+            const equipo =
+              r.colaboradores?.length > 0
+                ? ` · Equipo: ${[r.entrevistador, ...r.colaboradores].filter(Boolean).join(', ')}`
+                : '';
             return (
               <button
                 key={r.id}
@@ -88,6 +111,7 @@ export default function RoundStartScreen({
                 <span className="text-[10px] font-mono text-muted-foreground">ID {formatRoundCodigoDisplay(r)}</span>
                 <span className="text-[10px] text-muted-foreground block">
                   {eff}/{r.totalCasas} efectivas (E) · {r.casas.filter((c) => c.guardada).length} visitas
+                  {equipo}
                 </span>
               </button>
             );
@@ -99,6 +123,14 @@ export default function RoundStartScreen({
         <div className="mb-5 rounded-2xl border-2 border-primary/40 bg-primary/10 p-4 space-y-3">
           <p className="text-[11px] font-bold uppercase tracking-wide text-primary">Ronda en curso</p>
           <p className="text-[10px] font-mono text-muted-foreground">ID {formatRoundCodigoDisplay(savedRound)}</p>
+          {(savedRound.colaboradores?.length ?? 0) > 0 && (
+            <p className="text-[10px] text-muted-foreground">
+              Equipo:{' '}
+              <span className="font-semibold text-foreground">
+                {[savedRound.entrevistador, ...savedRound.colaboradores].filter(Boolean).join(' · ')}
+              </span>
+            </p>
+          )}
           <RoundProgressPanel
             moduloLabel={savedRound.moduloLabel}
             roundCodigo={formatRoundCodigoDisplay(savedRound)}
@@ -122,7 +154,7 @@ export default function RoundStartScreen({
               className="w-full text-xs font-semibold text-muted-foreground hover:text-destructive flex items-center justify-center gap-1 py-1"
             >
               <Trash2 className="w-3.5 h-3.5" />
-              Descartar y empezar otra
+              Descartar y liberar cupo
             </button>
           )}
         </div>
@@ -133,7 +165,9 @@ export default function RoundStartScreen({
         </div>
         <div>
           <h2 className="text-xl font-black text-foreground leading-tight">Inicio de ronda</h2>
-          <p className="text-sm text-muted-foreground">{cfg.casasPorModulo} casas efectivas (E) por ronda</p>
+          <p className="text-sm text-muted-foreground">
+            {cfg.casasPorModulo} casas efectivas (E) · hasta {maxActiveRounds} rondas activas
+          </p>
         </div>
       </div>
 
@@ -188,10 +222,7 @@ export default function RoundStartScreen({
           servicio={servicioNombre ?? null}
           entrevistadorNombre={entrevistadorNombre}
           seleccionados={colaboradores}
-          onToggle={(nombre) => {
-            if (colaboradores.includes(nombre)) onRemoveColaborador(nombre);
-            else onAddColaborador(nombre);
-          }}
+          onToggle={onToggleEquipo}
         />
       )}
       {(mostrarManual || sinCatalogo) && (
@@ -206,15 +237,32 @@ export default function RoundStartScreen({
       )}
       {!mostrarManual && !sinCatalogo && <div className="mb-5" />}
 
+      {canStart && barrio.trim() && !savedRound && activeDrafts.length >= maxActiveRounds && (
+        <p className="mb-3 text-xs text-destructive font-medium text-center">
+          Ya tenés {maxActiveRounds} rondas activas. Descartá una arriba para comenzar otra.
+        </p>
+      )}
+
       {canStart && barrio.trim() && !savedRound && (
         <div className="mb-4 rounded-xl border border-dashed border-muted-foreground/40 px-3 py-2 text-center">
           <p className="text-[10px] text-muted-foreground">
             Ronda: <span className="font-bold text-foreground">{barrio.trim()}</span> ·{' '}
             <span className="font-bold text-success">0</span> / {cfg.casasPorModulo} efectivas (E)
+            {colaboradores.length > 0 && (
+              <>
+                {' '}
+                · Equipo: {colaboradores.length + 1} persona(s)
+              </>
+            )}
           </p>
         </div>
       )}
-      <button type="button" onClick={onStart} disabled={!canStart} className="mrv-btn-primary text-lg">
+      <button
+        type="button"
+        onClick={onStart}
+        disabled={!canStart || (!savedRound && activeDrafts.length >= maxActiveRounds)}
+        className="mrv-btn-primary text-lg"
+      >
         <Play className="w-6 h-6" />
         Comenzar monitoreo
       </button>

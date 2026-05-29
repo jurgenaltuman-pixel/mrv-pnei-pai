@@ -64,6 +64,59 @@ async function ensureRoundHistoryTable() {
   roundHistoryTableReady = true;
 }
 
+let roundDraftsTableReady = false;
+async function ensureRoundDraftsTable() {
+  if (roundDraftsTableReady) return;
+  await query(`
+    CREATE TABLE IF NOT EXISTS round_monitoring_drafts (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      owner_user_id uuid NOT NULL,
+      round_local_id text NOT NULL,
+      round_codigo text,
+      modulo_label text,
+      payload jsonb NOT NULL,
+      participant_user_ids uuid[] NOT NULL DEFAULT '{}',
+      efectivas_count int NOT NULL DEFAULT 0,
+      total_casas int NOT NULL DEFAULT 20,
+      fase text,
+      is_active boolean NOT NULL DEFAULT true,
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      created_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE (owner_user_id, round_local_id)
+    )
+  `);
+  await query(
+    `CREATE INDEX IF NOT EXISTS round_drafts_participant_idx ON round_monitoring_drafts USING gin (participant_user_ids)`
+  );
+  await query(
+    `CREATE INDEX IF NOT EXISTS round_drafts_active_idx ON round_monitoring_drafts (is_active, updated_at DESC)`
+  );
+  roundDraftsTableReady = true;
+}
+
+function countEfectivasInRound(round) {
+  const casas = round?.casas || [];
+  return casas.filter((c) => c.guardada && c.estado === 'E').length;
+}
+
+function isRoundPayloadActive(round) {
+  if (!round || round.fase === 'start') return false;
+  const eff = countEfectivasInRound(round);
+  const total = Number(round.totalCasas) || 20;
+  return eff < total;
+}
+
+function participantIdsForRound(ownerId, round) {
+  const ids = new Set([String(ownerId)]);
+  const extra = round?.colaboradorUserIds;
+  if (Array.isArray(extra)) {
+    for (const id of extra) {
+      if (id) ids.add(String(id));
+    }
+  }
+  return [...ids];
+}
+
 function mapRoundHistoryRow(row) {
   const completada = row.completada_at ? new Date(row.completada_at).getTime() : Date.now();
   return {
@@ -1011,6 +1064,137 @@ export function createApp() {
       res.json({ ok: true, id: rows[0]?.id });
     } catch (e) {
       console.error(e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  const MAX_ACTIVE_ROUNDS = 2;
+
+  app.put('/api/rounds/draft', authMiddleware, async (req, res) => {
+    try {
+      await ensureRoundDraftsTable();
+      const round = req.body?.round;
+      if (!round?.id) {
+        res.status(400).json({ error: 'round.id requerido' });
+        return;
+      }
+      const roundLocalId = String(round.id);
+      const { rows: prev } = await query(
+        `SELECT owner_user_id, participant_user_ids FROM round_monitoring_drafts WHERE round_local_id = $1`,
+        [roundLocalId]
+      );
+      let ownerId = String(round.userId || req.user.sub);
+      if (prev.length) {
+        ownerId = String(prev[0].owner_user_id);
+        const parts = (prev[0].participant_user_ids || []).map(String);
+        if (ownerId !== req.user.sub && !parts.includes(req.user.sub)) {
+          res.status(403).json({ error: 'No tenés permiso para actualizar esta ronda.' });
+          return;
+        }
+      } else if (ownerId !== req.user.sub) {
+        res.status(403).json({ error: 'Solo el titular puede iniciar la ronda en el servidor.' });
+        return;
+      }
+      const active = isRoundPayloadActive(round);
+      const participants = participantIdsForRound(ownerId, round);
+      const efectivas = countEfectivasInRound(round);
+      const totalCasas = Number(round.totalCasas) || 20;
+
+      if (active) {
+        const { rows: existing } = await query(
+          `SELECT round_local_id FROM round_monitoring_drafts
+           WHERE owner_user_id = $1 AND round_local_id = $2`,
+          [ownerId, roundLocalId]
+        );
+        if (!existing.length) {
+          const { rows: cnt } = await query(
+            `SELECT count(*)::int AS n FROM round_monitoring_drafts
+             WHERE is_active = true
+               AND $1::uuid = ANY(participant_user_ids)
+               AND NOT (owner_user_id = $2 AND round_local_id = $3)`,
+            [req.user.sub, ownerId, roundLocalId]
+          );
+          if ((cnt[0]?.n || 0) >= MAX_ACTIVE_ROUNDS) {
+            res.status(409).json({
+              error: `Ya tenés ${MAX_ACTIVE_ROUNDS} rondas activas. Concluí o descartá una antes de abrir otra.`,
+            });
+            return;
+          }
+        }
+      }
+
+      const { rows } = await query(
+        `INSERT INTO round_monitoring_drafts (
+          owner_user_id, round_local_id, round_codigo, modulo_label, payload,
+          participant_user_ids, efectivas_count, total_casas, fase, is_active, updated_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now())
+        ON CONFLICT (owner_user_id, round_local_id) DO UPDATE SET
+          round_codigo = EXCLUDED.round_codigo,
+          modulo_label = EXCLUDED.modulo_label,
+          payload = EXCLUDED.payload,
+          participant_user_ids = EXCLUDED.participant_user_ids,
+          efectivas_count = EXCLUDED.efectivas_count,
+          total_casas = EXCLUDED.total_casas,
+          fase = EXCLUDED.fase,
+          is_active = EXCLUDED.is_active,
+          updated_at = now()
+        RETURNING id`,
+        [
+          ownerId,
+          roundLocalId,
+          round.codigo || null,
+          String(round.moduloLabel || 'Ronda').trim(),
+          JSON.stringify(round),
+          participants,
+          efectivas,
+          totalCasas,
+          round.fase || null,
+          active,
+        ]
+      );
+      res.json({ ok: true, id: rows[0]?.id });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get('/api/rounds/drafts', authMiddleware, async (req, res) => {
+    try {
+      await ensureRoundDraftsTable();
+      const { rows } = await query(
+        `SELECT payload, updated_at FROM round_monitoring_drafts
+         WHERE is_active = true AND $1::uuid = ANY(participant_user_ids)
+         ORDER BY updated_at DESC
+         LIMIT $2`,
+        [req.user.sub, MAX_ACTIVE_ROUNDS]
+      );
+      const data = rows.map((r) => {
+        const p = typeof r.payload === 'object' ? r.payload : JSON.parse(String(r.payload));
+        return { ...p, updatedAt: new Date(r.updated_at).getTime() };
+      });
+      res.json({ data });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete('/api/rounds/draft/:localId', authMiddleware, async (req, res) => {
+    try {
+      await ensureRoundDraftsTable();
+      const localId = String(req.params.localId || '').trim();
+      if (!localId) {
+        res.status(400).json({ error: 'localId requerido' });
+        return;
+      }
+      await query(
+        `DELETE FROM round_monitoring_drafts
+         WHERE round_local_id = $1
+           AND (owner_user_id = $2 OR $2::uuid = ANY(participant_user_ids))`,
+        [localId, req.user.sub]
+      );
+      res.json({ ok: true });
+    } catch (e) {
       res.status(500).json({ error: e.message });
     }
   });

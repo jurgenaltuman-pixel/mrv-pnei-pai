@@ -41,9 +41,7 @@ export default function RecentRoundsDock({
   const [sheetOpen, setSheetOpen] = useState(false);
 
   const load = useCallback(async () => {
-    const rows = await roundMonitoringStorage.listResumableForUser(userId, {
-      includeDismissed: false,
-    });
+    const rows = await roundMonitoringStorage.listActiveDraftsForUser(userId);
     setRounds(rows.filter((r) => r.id !== activeRoundId));
   }, [userId, activeRoundId]);
 

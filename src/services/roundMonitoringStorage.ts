@@ -2,6 +2,8 @@ import type { CasaMonitoreo, RoundMonitoring } from '@/types/round-monitoring';
 import { getRoundConfig, MAX_CASAS_POR_MODULO } from '@/lib/round-config';
 import { ensureRoundCodigo, generarCodigoRonda } from '@/lib/round-codigo';
 import { isRoundDismissed, isRoundResumable } from '@/lib/round-resume';
+import { isRoundDraftActive, MAX_ACTIVE_ROUNDS_PER_USER } from '@/lib/round-active-limit';
+import { fetchRoundDraftsFromServer } from '@/services/roundDraftApi';
 
 const DB_NAME = 'mrv_rounds';
 const DB_VERSION = 1;
@@ -74,6 +76,7 @@ export function crearRondaVacia(params: {
   responsable: string | null;
   entrevistador?: string | null;
   colaboradores?: string[];
+  colaboradorUserIds?: string[];
 }): RoundMonitoring {
   const total = params.totalCasas ?? getRoundConfig().casasPorModulo;
   const now = Date.now();
@@ -96,6 +99,7 @@ export function crearRondaVacia(params: {
     responsable: params.responsable,
     entrevistador: params.entrevistador?.trim() || params.responsable?.trim() || null,
     colaboradores: (params.colaboradores || []).map((s) => s.trim()).filter(Boolean),
+    colaboradorUserIds: (params.colaboradorUserIds || []).map((s) => String(s).trim()).filter(Boolean),
     ultimaCasaResumen: null,
   };
 }
@@ -133,11 +137,45 @@ export const roundMonitoringStorage = {
     return rows[0] ?? null;
   },
 
+  /** Sincroniza borradores activos desde el servidor (otras sesiones / dispositivos). */
+  async syncDraftsFromServer(userId: string): Promise<void> {
+    try {
+      const remote = await fetchRoundDraftsFromServer();
+      for (const r of remote) {
+        const normalized = ensureRoundCodigo({ ...r, userId: r.userId || userId });
+        const local = await this.get(normalized.id);
+        if (!local || normalized.updatedAt >= local.updatedAt) {
+          await this.save(normalized);
+        }
+      }
+    } catch (e) {
+      console.warn('syncDraftsFromServer:', e);
+    }
+  },
+
+  /** Rondas activas visibles para el usuario (propias + equipo), máx. 2 en servidor. */
+  async listActiveDraftsForUser(userId: string): Promise<RoundMonitoring[]> {
+    await this.syncDraftsFromServer(userId);
+    const merged = new Map<string, RoundMonitoring>();
+    for (const r of await fetchRoundDraftsFromServer()) {
+      merged.set(r.id, ensureRoundCodigo(r));
+    }
+    for (const r of await this.listByUser(userId, 40)) {
+      const prev = merged.get(r.id);
+      if (!prev || r.updatedAt > prev.updatedAt) merged.set(r.id, ensureRoundCodigo(r));
+    }
+    return [...merged.values()]
+      .filter((r) => isRoundDraftActive(r) && !isRoundDismissed(userId, r.id))
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, MAX_ACTIVE_ROUNDS_PER_USER);
+  },
+
   /** Todas las rondas retomables del usuario, más reciente primero. */
   async listResumableForUser(
     userId: string,
     opts?: { includeDismissed?: boolean }
   ): Promise<RoundMonitoring[]> {
+    await this.syncDraftsFromServer(userId);
     const rows = await this.listByUser(userId, 30);
     return rows.filter(
       (r) => isRoundResumable(r) && (opts?.includeDismissed || !isRoundDismissed(userId, r.id))

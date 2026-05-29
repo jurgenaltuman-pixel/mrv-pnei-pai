@@ -75,6 +75,8 @@ export interface RoundMonitoring {
   entrevistador: string | null;
   /** Brigadistas adicionales en la misma ronda (misma región/distrito/servicio). */
   colaboradores: string[];
+  /** IDs de usuarios asignados (mismo equipo); sincronizan borrador en servidor. */
+  colaboradorUserIds?: string[];
   ultimaCasaResumen: { numero: number; estado: CasaEstadoCode; ninos: number } | null;
 }
 
