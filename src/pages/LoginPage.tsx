@@ -32,13 +32,6 @@ import {
   Fingerprint,
 } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
-import Box from '@mui/material/Box';
-import Paper from '@mui/material/Paper';
-import Fade from '@mui/material/Fade';
-import Grow from '@mui/material/Grow';
-import Typography from '@mui/material/Typography';
-import Chip from '@mui/material/Chip';
-import { m3LoginGradient } from '@/theme/m3-theme';
 import {
   cleanNominaDisplayName,
   cleanNominaUsername,
@@ -374,124 +367,40 @@ export default function LoginPage() {
   }, []);
 
   return (
-    <Box
-      sx={{
-        minHeight: '100dvh',
-        width: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        px: { xs: 2, sm: 4 },
-        py: { xs: 2, sm: 4 },
-        background: m3LoginGradient,
-        position: 'relative',
-        overflow: 'hidden',
-      }}
-      className="safe-area-top safe-area-bottom"
-    >
-      <Box
-        aria-hidden
-        sx={{
-          pointerEvents: 'none',
-          position: 'absolute',
-          inset: 0,
-          overflow: 'hidden',
-        }}
-      >
-        <Box
-          sx={{
-            position: 'absolute',
-            top: -80,
-            right: -64,
-            width: 256,
-            height: 256,
-            borderRadius: '50%',
-            bgcolor: 'rgba(255,255,255,0.12)',
-            filter: 'blur(48px)',
-          }}
-        />
-        <Box
-          sx={{
-            position: 'absolute',
-            bottom: 0,
-            left: 0,
-            width: 192,
-            height: 192,
-            borderRadius: '50%',
-            bgcolor: 'rgba(255,255,255,0.08)',
-            filter: 'blur(40px)',
-          }}
-        />
-      </Box>
+    <div className="auth-shell auth-login-bg relative min-h-dvh w-full flex flex-col items-center justify-center p-4 sm:p-8 safe-area-top safe-area-bottom overflow-hidden">
+      <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
+        <div className="absolute -top-20 -right-16 h-64 w-64 rounded-full bg-white/10 blur-3xl" />
+        <div className="absolute bottom-0 left-0 h-48 w-48 rounded-full bg-[#0077cc]/25 blur-3xl" />
+        <div className="absolute top-1/3 left-1/4 h-32 w-32 rounded-full bg-white/5 blur-2xl" />
+      </div>
 
-      <Box sx={{ position: 'absolute', top: 16, right: 16, zIndex: 20 }} className="safe-area-top">
+      <div className="absolute top-4 right-4 safe-area-top z-20">
         <ThemeToggle variant="onPrimary" className="!border-white/25 !bg-white/10 hover:!bg-white/20" />
-      </Box>
+      </div>
 
-      <Fade in timeout={400}>
-        <Box sx={{ width: '100%', maxWidth: 420, position: 'relative', zIndex: 1 }}>
-          <Grow in timeout={500}>
-            <Box sx={{ textAlign: 'center', mb: { xs: 3, sm: 4 } }}>
-              <Paper
-                elevation={6}
-                sx={{
-                  mx: 'auto',
-                  mb: 2.5,
-                  width: { xs: 120, sm: 136 },
-                  height: { xs: 120, sm: 136 },
-                  borderRadius: 4,
-                  p: 1.5,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  bgcolor: '#fff',
-                }}
-              >
-                <MrvAppLogo className="h-[88%] w-[88%] object-contain" loading="eager" />
-              </Paper>
-              <Typography
-                variant="h5"
-                component="h1"
-                sx={{
-                  fontWeight: 800,
-                  color: '#fff',
-                  textShadow: '0 1px 8px rgba(0,0,0,0.2)',
-                  px: 1,
-                }}
-              >
-                {APP_TITLE_PRIMARY}
-              </Typography>
-              <Chip
-                icon={<Shield className="w-3.5 h-3.5" />}
-                label={APP_CAMPAIGN_TAG}
-                size="small"
-                sx={{
-                  mt: 1.5,
-                  bgcolor: 'rgba(255,255,255,0.15)',
-                  color: '#fff',
-                  border: '1px solid rgba(255,255,255,0.3)',
-                  backdropFilter: 'blur(8px)',
-                  fontWeight: 600,
-                }}
+      <div className="w-full max-w-[420px] relative z-[1]">
+        <div className="text-center mb-7 sm:mb-8">
+          <div className="mx-auto mb-5 w-[7.5rem] h-[7.5rem] sm:w-[8.5rem] sm:h-[8.5rem] rounded-[1.75rem] bg-white p-3 sm:p-3.5 shadow-[0_24px_56px_-14px_rgba(0,0,0,0.5)] ring-1 ring-white/50">
+            <div className="h-full w-full rounded-2xl bg-gradient-to-b from-sky-50 to-white flex items-center justify-center overflow-hidden">
+              <MrvAppLogo
+                className="h-[88%] w-[88%] object-contain drop-shadow-sm"
+                loading="eager"
               />
-            </Box>
-          </Grow>
+            </div>
+          </div>
+          <h1 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight leading-snug drop-shadow-sm px-2">
+            {APP_TITLE_PRIMARY}
+          </h1>
+          <div className="mt-3 inline-flex items-center gap-1.5 bg-white/12 backdrop-blur-md text-white px-4 py-1.5 rounded-full text-xs font-semibold border border-white/25 shadow-sm">
+            <Shield className="w-3.5 h-3.5 shrink-0" />
+            {APP_CAMPAIGN_TAG}
+          </div>
+        </div>
 
-          <Grow in timeout={600}>
-            <Paper
-              component="form"
-              onSubmit={handleSubmit}
-              elevation={8}
-              sx={{
-                p: { xs: 2.5, sm: 3.5 },
-                borderRadius: 3,
-                width: '100%',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 2,
-              }}
-            >
+        <form
+          onSubmit={handleSubmit}
+          className="bg-card rounded-2xl shadow-[0_24px_60px_-16px_rgba(0,0,0,0.35)] p-5 sm:p-7 space-y-4 border border-white/40 w-full"
+        >
           <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-muted/80">
             <button
               type="button"
@@ -954,27 +863,17 @@ export default function LoginPage() {
             )}
           </button>
 
-            </Paper>
-          </Grow>
+        </form>
 
-          {import.meta.env.VITE_BUILD_ID && (
-            <Typography
-              variant="caption"
-              sx={{
-                display: 'block',
-                textAlign: 'center',
-                color: 'rgba(255,255,255,0.65)',
-                fontFamily: 'monospace',
-                mt: 2,
-                px: 1,
-              }}
-              title="Si este código no coincide con el último commit en GitHub, el deploy de Firebase no se actualizó."
-            >
-              Web publicada · commit {import.meta.env.VITE_BUILD_ID.slice(0, 7)}
-            </Typography>
-          )}
-        </Box>
-      </Fade>
-    </Box>
+        {import.meta.env.VITE_BUILD_ID && (
+          <p
+            className="text-center text-[10px] text-white/60 font-mono mt-4 tracking-tight px-2"
+            title="Si este código no coincide con el último commit en GitHub, el deploy de Firebase no se actualizó."
+          >
+            Web publicada · commit {import.meta.env.VITE_BUILD_ID.slice(0, 7)}
+          </p>
+        )}
+      </div>
+    </div>
   );
 }

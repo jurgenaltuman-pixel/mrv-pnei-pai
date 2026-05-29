@@ -96,6 +96,9 @@ if (!(await run('npm', ['test', '--', '--run']))) fail('vitest', new Error('test
 console.log('\n--- build ---');
 if (!(await run('npm', ['run', 'build']))) fail('vite build', new Error('build falló'));
 
+console.log('\n--- PWA / APK (estático) ---');
+if (!(await run('node', ['scripts/qa-pwa-apk.mjs']))) fail('qa-pwa-apk', new Error('checks PWA/APK'));
+
 console.log('\n=== Resumen ===');
 if (failures.length) {
   console.log('Fallos:', failures.join('; '));
