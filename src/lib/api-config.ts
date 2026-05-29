@@ -23,8 +23,36 @@ export const useRegistrosApi = () => USE_MRV_API;
 /** @deprecated usar USE_SUPABASE_ORG / USE_SUPABASE_PADRON */
 export const USE_SUPABASE_CATALOG = USE_SUPABASE_ORG || USE_SUPABASE_PADRON;
 
-/** Base URL vacía = mismo origen (/api vía Firebase Functions) */
-export const MRV_API_URL = (import.meta.env.VITE_MRV_API_URL ?? '').replace(/\/$/, '');
+/** Producción por defecto (Firebase PWA, APK, builds sin .env). */
+export const MRV_API_PRODUCTION_DEFAULT = 'https://rapid-vaccinator-main.vercel.app';
+
+/**
+ * Resuelve la base de la API MRV.
+ * - VITE_MRV_API_URL en build si existe.
+ * - Vercel / localhost: mismo origen (vacío → /api).
+ * - Firebase Hosting y otros estáticos: API en Vercel.
+ */
+export function resolveMrvApiBaseUrl(): string {
+  const fromEnv = String(import.meta.env.VITE_MRV_API_URL ?? '').trim().replace(/\/$/, '');
+  if (fromEnv) return fromEnv;
+
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname.toLowerCase();
+    if (
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host.endsWith('.vercel.app')
+    ) {
+      return '';
+    }
+    return MRV_API_PRODUCTION_DEFAULT;
+  }
+
+  return MRV_API_PRODUCTION_DEFAULT;
+}
+
+/** Base URL vacía = mismo origen (/api en Vercel o proxy dev). */
+export const MRV_API_URL = resolveMrvApiBaseUrl();
 
 const TOKEN_KEY = 'mrv_api_token';
 const SESSION_STARTED_KEY = 'mrv_session_started_at';
@@ -142,7 +170,8 @@ export async function mrvApiFetch<T = unknown>(
   const token = getApiToken();
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const url = `${MRV_API_URL}${path.startsWith('/') ? path : `/${path}`}`;
+  const base = resolveMrvApiBaseUrl();
+  const url = `${base}${path.startsWith('/') ? path : `/${path}`}`;
   const method = (init.method || 'GET').toUpperCase();
 
   async function doFetch(): Promise<Response> {
@@ -179,7 +208,16 @@ export async function mrvApiFetch<T = unknown>(
     body = {};
   }
   if (!res.ok) {
-    return { error: body.error || res.statusText, status: res.status };
+    const ct = res.headers.get('content-type') || '';
+    const looksLikeHtml = ct.includes('text/html');
+    let err = body.error || res.statusText;
+    if (res.status === 404 && looksLikeHtml) {
+      err =
+        'No hay API en este sitio. Cerrá la app, actualizá desde el navegador o usá la versión en Vercel.';
+    } else if (res.status === 401 || res.status === 403) {
+      err = body.error || 'Credenciales inválidas o cuenta sin aprobar.';
+    }
+    return { error: err, status: res.status };
   }
   return { data: body as T, status: res.status };
 }

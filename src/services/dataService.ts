@@ -1,5 +1,6 @@
 import { supabase, isSupabaseEnabled } from '@/integrations/supabase/client';
 import {
+  MRV_API_URL,
   USE_MRV_API,
   USE_SUPABASE_PADRON,
   USE_SUPABASE_REGISTROS,
@@ -809,11 +810,7 @@ export const dataService = {
     if (hasLetter && trimmed.length < 3 && !trimmed.includes(' ')) return [];
     const limit = Math.min(20, options?.limit ?? 12);
     if (USE_MRV_API) {
-      const base = import.meta.env.VITE_MRV_API_URL ?? '';
-      if (!base) {
-        throw new Error('Falta VITE_MRV_API_URL en la configuración de la app.');
-      }
-      const url = `${String(base).replace(/\/$/, '')}/api/public/nomina-search?q=${encodeURIComponent(trimmed)}`;
+      const url = `${MRV_API_URL}/api/public/nomina-search?q=${encodeURIComponent(trimmed)}`;
       const res = await fetch(url, { signal: options?.signal });
       const body = (await res.json().catch(() => ({}))) as { data?: unknown[]; error?: string };
       if (!res.ok) {

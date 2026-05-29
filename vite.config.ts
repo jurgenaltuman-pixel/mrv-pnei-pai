@@ -4,17 +4,29 @@ import path from "path";
 import { componentTagger } from "lovable-tagger";
 
 // https://vitejs.dev/config/
-export default defineConfig(({ mode }) => ({
+export default defineConfig(({ mode }) => {
+  const mrvApiUrl =
+    process.env.VITE_MRV_API_URL?.trim() ||
+    (mode === "production" ? "https://rapid-vaccinator-main.vercel.app" : "");
+
+  return {
   base: "/",
   define: {
     __SUPABASE_URL__: JSON.stringify(process.env.VITE_SUPABASE_URL || 'https://fqdddcineslaxdkyiksf.supabase.co'),
     __SUPABASE_KEY__: JSON.stringify(process.env.VITE_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_uxi5fOL6TkY5sMf5o9CZUg_8Lb8iOgK'),
+    "import.meta.env.VITE_MRV_API_URL": JSON.stringify(mrvApiUrl),
   },
   server: {
     host: "::",
     port: 8080,
     hmr: {
       overlay: false,
+    },
+    proxy: {
+      '/api': {
+        target: process.env.VITE_MRV_API_PROXY || 'http://localhost:8787',
+        changeOrigin: true,
+      },
     },
   },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
@@ -59,4 +71,5 @@ export default defineConfig(({ mode }) => ({
     },
     chunkSizeWarningLimit: 1500,
   },
-}));
+};
+});
