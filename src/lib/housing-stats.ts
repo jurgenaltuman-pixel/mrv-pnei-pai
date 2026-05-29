@@ -56,12 +56,12 @@ export function sumarViviendas(c: HousingCounts): number {
 
 /**
  * Resumen jornada (informe MRV):
- * - Cerradas (tarjeta «Fallida · cerradas») = E + N + F
- * - Abiertas (rechazo con adulto) = R
+ * - Abiertas = E + N + R
+ * - Fallida · cerradas = solo F
  */
 export function resumenAbiertasCerradas(c: HousingCounts) {
-  const cerradas = c.efectivas + c.noEfectivas + c.fallidas;
-  const abiertas = c.renuentes;
+  const abiertas = c.efectivas + c.noEfectivas + c.renuentes;
+  const cerradas = c.fallidas;
   const total = sumarViviendas(c);
   return {
     abiertas,

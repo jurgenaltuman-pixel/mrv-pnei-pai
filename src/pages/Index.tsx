@@ -1,25 +1,52 @@
+import type { ReactNode } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import LoginPage from './LoginPage';
 import MainApp from './MainApp';
-import { Loader2 } from 'lucide-react';
 import PendingApprovalPage from './PendingApprovalPage';
 import ForcePasswordChangePage from './ForcePasswordChangePage';
+import M3PageTransition from '@/components/m3/M3PageTransition';
+import Box from '@mui/material/Box';
+import CircularProgress from '@mui/material/CircularProgress';
+import Typography from '@mui/material/Typography';
 
 export default function Index() {
   const { user, loading, approvalPending, mustChangePassword } = useAuth();
 
   if (loading) {
     return (
-      <div className="flex flex-1 min-h-dvh w-full bg-background items-center justify-center">
-        <div className="text-center">
-          <Loader2 className="w-10 h-10 text-primary animate-spin mx-auto mb-3" />
-          <p className="text-sm text-muted-foreground">Cargando...</p>
-        </div>
-      </div>
+      <Box
+        sx={{
+          flex: 1,
+          minHeight: '100dvh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          bgcolor: 'background.default',
+        }}
+      >
+        <Box sx={{ textAlign: 'center' }}>
+          <CircularProgress size={44} thickness={4} />
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+            Cargando…
+          </Typography>
+        </Box>
+      </Box>
     );
   }
 
-  if (user && approvalPending) return <PendingApprovalPage />;
-  if (user && mustChangePassword) return <ForcePasswordChangePage />;
-  return user ? <MainApp /> : <LoginPage />;
+  const routeKey = !user
+    ? 'login'
+    : approvalPending
+      ? 'pending'
+      : mustChangePassword
+        ? 'password'
+        : 'app';
+
+  let content: ReactNode;
+  if (!user) content = <LoginPage />;
+  else if (approvalPending) content = <PendingApprovalPage />;
+  else if (mustChangePassword) content = <ForcePasswordChangePage />;
+  else content = <MainApp />;
+
+  return <M3PageTransition routeKey={routeKey}>{content}</M3PageTransition>;
 }

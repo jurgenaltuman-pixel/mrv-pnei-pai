@@ -1,4 +1,16 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700&display=swap');
+
+/* Material Design 3 — tokens base (complementan MUI ThemeProvider) */
+:root {
+  --md-sys-motion-duration-short: 220ms;
+  --md-sys-motion-duration-medium: 280ms;
+  --md-sys-motion-easing: cubic-bezier(0.2, 0, 0, 1);
+  --md-sys-shape-corner-large: 20px;
+  --md-sys-shape-corner-xl: 28px;
+  --md-sys-elevation-1: 0 1px 3px rgb(0 0 0 / 0.08), 0 4px 12px rgb(0 0 0 / 0.06);
+  --md-sys-elevation-2: 0 2px 6px rgb(0 0 0 / 0.1), 0 8px 24px rgb(0 0 0 / 0.08);
+}
 
 .mrv-map-shell {
   overflow: visible;
@@ -219,7 +231,10 @@
     contain-intrinsic-size: auto 3rem;
   }
   .mrv-panel {
-    @apply bg-card rounded-2xl border border-border/80 shadow-sm p-4 sm:p-5 mb-3;
+    @apply bg-card border border-border/80 p-4 sm:p-5 mb-3;
+    border-radius: var(--md-sys-shape-corner-large);
+    box-shadow: var(--md-sys-elevation-1);
+    transition: box-shadow var(--md-sys-motion-duration-medium) var(--md-sys-motion-easing);
   }
   .mrv-panel-accent {
     @apply border-l-4 border-l-primary;
@@ -261,7 +276,15 @@
     @apply border-primary bg-primary/10 ring-2 ring-primary/30;
   }
   .mrv-btn-primary {
-    @apply w-full min-h-[56px] rounded-xl bg-primary text-primary-foreground font-bold text-base shadow-md active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2;
+    @apply w-full min-h-[56px] bg-primary text-primary-foreground font-bold text-base disabled:opacity-50 flex items-center justify-center gap-2;
+    border-radius: 20px;
+    box-shadow: var(--md-sys-elevation-1);
+    transition: transform var(--md-sys-motion-duration-short) var(--md-sys-motion-easing),
+      box-shadow var(--md-sys-motion-duration-medium) var(--md-sys-motion-easing);
+  }
+  .mrv-btn-primary:active:not(:disabled) {
+    transform: scale(0.98);
+    box-shadow: var(--md-sys-elevation-2);
   }
   .mrv-btn-success {
     @apply w-full min-h-[56px] rounded-xl bg-success text-success-foreground font-bold text-base shadow-md active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2;

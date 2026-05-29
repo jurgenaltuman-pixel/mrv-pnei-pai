@@ -41,7 +41,7 @@ export default function HousingStatsPanel({ contador, variant = 'full', showHelp
             </div>
             <p className="text-3xl font-black text-success leading-none">{abiertas}</p>
             <p className="text-[10px] text-muted-foreground mt-1.5 leading-snug">
-              Rechazo con adulto (R)
+              Efectiva, no efectiva o renuente (E + N + R)
             </p>
             {total > 0 && (
               <p className="text-[10px] font-semibold text-success/80 mt-1">{pctAbiertas}% del total</p>
@@ -56,7 +56,7 @@ export default function HousingStatsPanel({ contador, variant = 'full', showHelp
             </div>
             <p className="text-3xl font-black text-destructive leading-none">{fallidas}</p>
             <p className="text-[10px] text-muted-foreground mt-1.5 leading-snug">
-              Visitas registradas (E + N + F)
+              Casa cerrada / sin adulto (F)
             </p>
             {total > 0 && (
               <p className="text-[10px] font-semibold text-destructive/80 mt-1">{pctFallidas}% del total</p>
@@ -85,7 +85,7 @@ export default function HousingStatsPanel({ contador, variant = 'full', showHelp
           </div>
           <div className="flex justify-between text-[10px] text-muted-foreground font-medium">
             <span>■ Abiertas {abiertas}</span>
-            <span>■ Cerradas (E+N+F) {fallidas}</span>
+            <span>■ Cerradas (F) {fallidas}</span>
           </div>
         </div>
       )}
@@ -143,8 +143,8 @@ export default function HousingStatsPanel({ contador, variant = 'full', showHelp
             </p>
           ))}
           <p className="pt-2 border-t text-muted-foreground">
-            <strong className="text-foreground">Abiertas</strong> = R (renuente / rechazo con adulto).{' '}
-            <strong className="text-foreground">Fallida · cerradas</strong> = E + N + F.
+            <strong className="text-foreground">Abiertas</strong> = E + N + R.{' '}
+            <strong className="text-foreground">Fallida · cerradas</strong> = F.
           </p>
         </div>
       )}
