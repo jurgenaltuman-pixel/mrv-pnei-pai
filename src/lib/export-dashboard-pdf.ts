@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { DashboardData } from '@/services/dataService';
+import { saveBlobAsFile } from '@/lib/download-file';
 import { formatFechaHoraPy } from '@/lib/format-fecha';
 
 export function downloadDashboardPdf(data: DashboardData, titulo = 'Panel MRV') {
@@ -56,5 +57,6 @@ export function downloadDashboardPdf(data: DashboardData, titulo = 'Panel MRV') 
     });
   }
 
-  doc.save(`MRV_Panel_${new Date().toISOString().slice(0, 10)}.pdf`);
+  const fn = `MRV_Panel_${new Date().toISOString().slice(0, 10)}.pdf`;
+  void saveBlobAsFile(fn, doc.output('blob'), 'application/pdf');
 }

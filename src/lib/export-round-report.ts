@@ -7,6 +7,7 @@ import { formatFechaHoraPy } from '@/lib/format-fecha';
 import { UMBRAL_COBERTURA_APROBADO } from '@/lib/round-evaluation';
 import { getEstadoConfig } from '@/lib/croquis-housing';
 import { formatRoundCodigoDisplay } from '@/lib/round-codigo';
+import { saveBlobAsFile } from '@/lib/download-file';
 import { appendMetaSheet, jsonSheetWithCols } from '@/lib/xlsx-report-utils';
 
 type DetalleFila = {
@@ -142,7 +143,11 @@ export function downloadRoundReportExcel(
     { campo: 'generado', valor: formatFechaHoraPy(new Date()) },
   ]);
   const fn = `MRV_Ronda_${formatRoundCodigoDisplay(round)}_${safeFilename(round.moduloLabel)}.xlsx`;
-  XLSX.writeFile(wb, fn);
+  const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([buf], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+  void saveBlobAsFile(fn, blob);
 }
 
 export function downloadRoundReportPdf(
@@ -247,5 +252,6 @@ export function downloadRoundReportPdf(
   });
 
   const fn = `MRV_Ronda_${roundId}_${safeFilename(round.moduloLabel)}.pdf`;
-  doc.save(fn);
+  const blob = doc.output('blob');
+  void saveBlobAsFile(fn, blob, 'application/pdf');
 }

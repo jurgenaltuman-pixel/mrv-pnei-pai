@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import type { RegistroMRV } from '@/services/dataService';
 import { formatFechaHoraPy, formatFechaPy } from '@/lib/format-fecha';
+import { saveBlobAsFile } from '@/lib/download-file';
 import { appendMetaSheet, jsonSheetWithCols } from '@/lib/xlsx-report-utils';
 
 const CAMBIO_TAG = '[Cambio de residencia]';
@@ -171,5 +172,10 @@ export function downloadRegistrosExcel(
     { campo: 'longitud', valor: 'Grados decimales (-180 a 180)' },
   ]);
 
-  XLSX.writeFile(wb, `${filenamePrefix}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  const fn = `${filenamePrefix}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([buf], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+  void saveBlobAsFile(fn, blob);
 }

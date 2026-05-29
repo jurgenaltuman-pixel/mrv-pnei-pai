@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import html2canvas from 'html2canvas';
+import { mapCaptureScale, saveBlobAsFile } from '@/lib/download-file';
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -139,16 +140,18 @@ export default function MrvMapPanel({
       const canvas = await html2canvas(el, {
         useCORS: true,
         allowTaint: true,
-        scale: 2,
+        scale: mapCaptureScale(),
         backgroundColor: '#ffffff',
         logging: false,
         ignoreElements: (node) => node.classList?.contains('mrv-map-download-btn') ?? false,
       });
       const stamp = new Date().toISOString().slice(0, 10);
-      const link = document.createElement('a');
-      link.download = `mapa-mrv-${stamp}.jpg`;
-      link.href = canvas.toDataURL('image/jpeg', 0.92);
-      link.click();
+      const fn = `mapa-mrv-${stamp}.jpg`;
+      const blob = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.88);
+      });
+      if (!blob) throw new Error('No se pudo generar la imagen');
+      await saveBlobAsFile(fn, blob, 'image/jpeg');
     } catch {
       // fallback silencioso si tiles bloquean captura
     } finally {
