@@ -53,7 +53,8 @@ interface UserSuggestion {
 
 export default function LoginPage() {
   const { login, signup, signOutNotice, dismissSignOutNotice } = useAuth();
-  const { regiones, getDistritosByRegion, getServiciosByDistrito } = useOrgStructure();
+  const { regiones, getDistritosByRegion, getServiciosByDistrito, loading: orgLoading } =
+    useOrgStructure();
   const [isSignup, setIsSignup] = useState(false);
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
@@ -106,7 +107,7 @@ export default function LoginPage() {
     const digits = t.replace(/\D/g, '');
     const hasLetter = /[A-Za-zÁÉÍÓÚáéíóúÑñ]/.test(t);
     const words = t.split(/\s+/).filter((w) => w.length >= 3);
-    if (!hasLetter && digits.length > 0) return 5;
+    if (!hasLetter && digits.length > 0) return 4;
     if (words.length >= 2) return 3;
     return 4;
   };
@@ -273,7 +274,8 @@ export default function LoginPage() {
       const name = err && typeof err === 'object' && 'name' in err ? String((err as { name?: string }).name) : '';
       if (name !== 'AbortError') {
         console.error('❌ Error en búsqueda:', err);
-        setSearchError('Error al buscar usuarios. Intenta de nuevo.');
+        const msg = err instanceof Error ? err.message : 'Error al buscar usuarios. Intenta de nuevo.';
+        setSearchError(msg);
         setSuggestions([]);
         setLastSearchedQuery(trimmedQuery);
       }
@@ -296,7 +298,7 @@ export default function LoginPage() {
 
     setLastSearchedQuery('');
     const debounceDelay =
-      minCharsForSignupSearch(trimmed) === 5 && /^\d[\d\s.]*$/.test(trimmed) ? 120 : 250;
+      minCharsForSignupSearch(trimmed) === 4 && /^\d[\d\s.]*$/.test(trimmed) ? 120 : 250;
 
     debounceTimer.current = setTimeout(() => {
       void searchUsers(value);
@@ -320,6 +322,7 @@ export default function LoginPage() {
     setCiFound(user);
     setNominaMatched(true);
     setManualSignupOpen(true);
+    setSearchError('');
     setSuggestions([]);
     setSearchQuery('');
   };
@@ -609,63 +612,33 @@ export default function LoginPage() {
                     </p>
                   </div>
                 )}
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setManualSignupOpen(true);
+                      setNominaMatched(false);
+                    }}
+                    className="text-xs font-semibold text-primary underline"
+                  >
+                    No estoy en la nómina — registro manual
+                  </button>
+                </div>
               </div>
 
-              {(manualSignupOpen || nominaMatched || ci.trim().length >= 5) && (
-              <>
-              <div>
-                <label className="field-label flex items-center gap-1">
-                  <CreditCard className="w-3 h-3" /> Documento / CI <span className="text-destructive">*</span>
-                </label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  value={ci}
-                  onChange={(e) => {
-                    setCi(normalizeNominaDocumento(e.target.value));
-                    setNominaMatched(false);
-                  }}
-                  className="auth-input"
-                  placeholder="Ej: 1234567"
-                  required
-                />
-                <p className="text-[10px] text-muted-foreground mt-1">Obligatorio. Solo números, mínimo 5 dígitos.</p>
-              </div>
-
-              <div>
-                <label className="field-label flex items-center gap-1">
-                  <User className="w-3 h-3" /> Nombre completo <span className="text-destructive">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={displayName}
-                  onChange={(e) =>
-                    setDisplayName(nominaMatched ? e.target.value : upperText(e.target.value))
-                  }
-                  className="auth-input uppercase"
-                  placeholder="EJ: JUAN PÉREZ GÓMEZ"
-                  style={nominaMatched ? undefined : { textTransform: 'uppercase' }}
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="field-label flex items-center gap-1">
-                  <AtSign className="w-3 h-3" /> Usuario <span className="text-destructive">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/\s/g, ''))}
-                  className="auth-input"
-                  placeholder="Ej: jperez o tu CI"
-                  required
-                />
-                <p className="text-[10px] text-muted-foreground mt-1">Para iniciar sesión. Podés cambiarlo si hace falta.</p>
-              </div>
-
-              <div className="rounded-xl border border-dashed p-3 space-y-2 bg-muted/20">
+              <div className="rounded-xl border border-primary/30 p-3 space-y-2 bg-primary/5">
                 <p className="text-xs font-bold text-primary">Región, distrito y servicio de salud</p>
+                <p className="text-[10px] text-muted-foreground">
+                  Obligatorio para el registro. Si buscaste en nómina, se completan solos al elegir tu nombre.
+                </p>
+                {orgLoading && regiones.length === 0 ? (
+                  <p className="text-xs text-muted-foreground animate-pulse">Cargando catálogo…</p>
+                ) : regiones.length === 0 ? (
+                  <p className="text-xs text-amber-700">
+                    No se cargó el catálogo. Revisá conexión o probá recargar la página.
+                  </p>
+                ) : null}
                 <div className="grid grid-cols-1 gap-2">
                   <select
                     value={signupRegion}
@@ -721,6 +694,59 @@ export default function LoginPage() {
                     ))}
                   </select>
                 </div>
+              </div>
+
+              {(manualSignupOpen || nominaMatched || ci.trim().length >= 5) && (
+              <>
+              <div>
+                <label className="field-label flex items-center gap-1">
+                  <CreditCard className="w-3 h-3" /> Documento / CI <span className="text-destructive">*</span>
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={ci}
+                  onChange={(e) => {
+                    setCi(normalizeNominaDocumento(e.target.value));
+                    setNominaMatched(false);
+                  }}
+                  className="auth-input"
+                  placeholder="Ej: 1234567"
+                  required
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">Obligatorio. Solo números, mínimo 5 dígitos.</p>
+              </div>
+
+              <div>
+                <label className="field-label flex items-center gap-1">
+                  <User className="w-3 h-3" /> Nombre completo <span className="text-destructive">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={displayName}
+                  onChange={(e) =>
+                    setDisplayName(nominaMatched ? e.target.value : upperText(e.target.value))
+                  }
+                  className="auth-input uppercase"
+                  placeholder="EJ: JUAN PÉREZ GÓMEZ"
+                  style={nominaMatched ? undefined : { textTransform: 'uppercase' }}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="field-label flex items-center gap-1">
+                  <AtSign className="w-3 h-3" /> Usuario <span className="text-destructive">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/\s/g, ''))}
+                  className="auth-input"
+                  placeholder="Ej: jperez o tu CI"
+                  required
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">Para iniciar sesión. Podés cambiarlo si hace falta.</p>
               </div>
               </>
               )}

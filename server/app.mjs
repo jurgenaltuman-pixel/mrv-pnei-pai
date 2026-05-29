@@ -189,7 +189,7 @@ export function createApp() {
         .map((t) => t.trim())
         .filter((t) => t.length >= 3);
 
-      if (!hasLetter && digits.length < 5) {
+      if (!hasLetter && digits.length < 4) {
         res.json({ data: [] });
         return;
       }
@@ -200,16 +200,17 @@ export function createApp() {
 
       let rows;
       const docDigitsSql = `regexp_replace(COALESCE(username, ''), '[^0-9]', '', 'g')`;
-      const baseFilter = `is_active = true
+      const baseFilter = `COALESCE(is_active, true) = true
         AND (
           nomina_documento IS NOT NULL
-          OR length(${docDigitsSql}) >= 5
+          OR length(${docDigitsSql}) >= 4
+          OR length(trim(COALESCE(display_name, ''))) >= 3
         )`;
 
       const nominaCols = `nomina_documento, username, display_name, email, assigned_region, assigned_distrito, assigned_servicio`;
 
       if (!hasLetter && digits.length >= 4) {
-        const exactOnly = digits.length >= 6;
+        const exactOnly = digits.length >= 7;
         const { rows: r } = await query(
           exactOnly
             ? `SELECT ${nominaCols} FROM profiles
@@ -430,20 +431,33 @@ export function createApp() {
     }
   });
 
+  async function loadOrgStructurePayload() {
+    const [regiones, distritos, servicios, barrios] = await Promise.all([
+      query('SELECT id, nombre, codigo FROM regiones_sanitarias ORDER BY nombre'),
+      query('SELECT id, nombre, region_id FROM distritos ORDER BY nombre'),
+      query('SELECT id, nombre, distrito_id FROM servicios_salud ORDER BY nombre'),
+      query('SELECT id, nombre, distrito_id FROM barrios ORDER BY nombre'),
+    ]);
+    return {
+      regiones: regiones.rows,
+      distritos: distritos.rows,
+      servicios: servicios.rows,
+      barrios: barrios.rows,
+    };
+  }
+
+  /** Catálogo territorial para registro (sin login). */
+  app.get('/api/public/org-structure', async (_req, res) => {
+    try {
+      res.json(await loadOrgStructurePayload());
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get('/api/org/structure', authMiddleware, async (_req, res) => {
     try {
-      const [regiones, distritos, servicios, barrios] = await Promise.all([
-        query('SELECT id, nombre, codigo FROM regiones_sanitarias ORDER BY nombre'),
-        query('SELECT id, nombre, region_id FROM distritos ORDER BY nombre'),
-        query('SELECT id, nombre, distrito_id FROM servicios_salud ORDER BY nombre'),
-        query('SELECT id, nombre, distrito_id FROM barrios ORDER BY nombre'),
-      ]);
-      res.json({
-        regiones: regiones.rows,
-        distritos: distritos.rows,
-        servicios: servicios.rows,
-        barrios: barrios.rows,
-      });
+      res.json(await loadOrgStructurePayload());
     } catch (e) {
       res.status(500).json({ error: e.message });
     }

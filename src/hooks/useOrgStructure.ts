@@ -3,7 +3,7 @@ import { supabase, isSupabaseEnabled } from '@/integrations/supabase/client';
 import type { RegionSanitaria, Distrito, ServicioSalud, Barrio } from '@/types/mrv';
 import { mrvAppCache } from '@/services/mrvAppCache';
 import { fetchAllBarriosPaginated } from '@/lib/supabase-paginate';
-import { USE_MRV_API, USE_SUPABASE_ORG, mrvApiFetch } from '@/lib/api-config';
+import { USE_MRV_API, USE_SUPABASE_ORG, MRV_API_URL, getApiToken, mrvApiFetch } from '@/lib/api-config';
 
 const PAGE = 1000;
 
@@ -60,13 +60,38 @@ export function useOrgStructure() {
 
     const loadRemote = async () => {
       if (USE_MRV_API && !USE_SUPABASE_ORG) {
-        const { data, error } = await mrvApiFetch<{
+        const base = MRV_API_URL;
+        const token = getApiToken();
+        const path = token ? '/api/org/structure' : '/api/public/org-structure';
+        let payload: {
           regiones: RegionSanitaria[];
           distritos: Distrito[];
           servicios: ServicioSalud[];
           barrios: Barrio[];
-        }>('/api/org/structure');
-        if (cancelled || error || !data) return;
+        } | null = null;
+        if (base) {
+          const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
+          const res = await fetch(`${base}${path}`, { headers });
+          const body = (await res.json().catch(() => ({}))) as {
+            regiones?: RegionSanitaria[];
+            distritos?: Distrito[];
+            servicios?: ServicioSalud[];
+            barrios?: Barrio[];
+            error?: string;
+          };
+          if (res.ok && body.regiones) payload = body as typeof payload;
+          else if (!res.ok) console.warn('org-structure:', body.error || res.status);
+        } else {
+          const { data, error } = await mrvApiFetch<{
+            regiones: RegionSanitaria[];
+            distritos: Distrito[];
+            servicios: ServicioSalud[];
+            barrios: Barrio[];
+          }>(path);
+          if (!error && data) payload = data;
+        }
+        if (cancelled || !payload) return;
+        const data = payload;
         const barriosData = (data.barrios || []) as Barrio[];
         const { regionesValidas, distritosData, serviciosData } = applyOrgData(
           data.regiones || [],

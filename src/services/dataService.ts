@@ -810,12 +810,14 @@ export const dataService = {
     const limit = Math.min(20, options?.limit ?? 12);
     if (USE_MRV_API) {
       const base = import.meta.env.VITE_MRV_API_URL ?? '';
+      if (!base) {
+        throw new Error('Falta VITE_MRV_API_URL en la configuración de la app.');
+      }
       const url = `${String(base).replace(/\/$/, '')}/api/public/nomina-search?q=${encodeURIComponent(trimmed)}`;
       const res = await fetch(url, { signal: options?.signal });
       const body = (await res.json().catch(() => ({}))) as { data?: unknown[]; error?: string };
       if (!res.ok) {
-        console.error('nomina-search:', body.error || res.status);
-        return [];
+        throw new Error(body.error || `Error de búsqueda (${res.status})`);
       }
       if (!Array.isArray(body.data)) return [];
       return body.data
@@ -826,13 +828,16 @@ export const dataService = {
           if (o.nomina_documento) {
             mapped.documento = normalizeNominaDocumento(String(o.nomina_documento));
           }
+          if (!mapped.documento && mapped.username) {
+            mapped.documento = normalizeNominaDocumento(mapped.username);
+          }
           return mapped;
         })
         .filter((r) => {
           const hasDoc = r.documento.length >= 4;
           const hasName = (r.nombre || '').trim().length >= 2;
           const hasUser = (r.username || '').trim().length >= 2;
-          return hasDoc && (hasName || hasUser);
+          return hasDoc || hasName || hasUser;
         });
     }
     if (!isSupabaseEnabled) return [];
