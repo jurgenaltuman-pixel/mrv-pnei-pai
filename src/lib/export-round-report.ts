@@ -8,6 +8,7 @@ import { UMBRAL_COBERTURA_APROBADO } from '@/lib/round-evaluation';
 import { getEstadoConfig } from '@/lib/croquis-housing';
 import { formatRoundCodigoDisplay } from '@/lib/round-codigo';
 import { saveBlobAsFile } from '@/lib/download-file';
+import { enrichRoundPersonnel, type RoundPersonnelHints } from '@/lib/round-report-meta';
 import { appendMetaSheet, jsonSheetWithCols } from '@/lib/xlsx-report-utils';
 
 type DetalleFila = {
@@ -114,11 +115,13 @@ function safeFilename(label: string) {
 export function downloadRoundReportExcel(
   round: RoundMonitoring,
   summary: RoundSummary,
-  evaluation: RoundEvaluation
+  evaluation: RoundEvaluation,
+  personnel?: RoundPersonnelHints
 ) {
+  const r = enrichRoundPersonnel(round, personnel);
   const wb = XLSX.utils.book_new();
-  jsonSheetWithCols(wb, resumenRows(round, summary, evaluation), 'Resumen');
-  const detalle = buildDetalleFilas(round);
+  jsonSheetWithCols(wb, resumenRows(r, summary, evaluation), 'Resumen');
+  const detalle = buildDetalleFilas(r);
   jsonSheetWithCols(
     wb,
     detalle.length
@@ -139,10 +142,10 @@ export function downloadRoundReportExcel(
   );
   appendMetaSheet(wb, [
     { campo: 'sistema', valor: 'MRV — Monitoreo Rápido de Vacunación' },
-    { campo: 'id_ronda', valor: formatRoundCodigoDisplay(round) },
+    { campo: 'id_ronda', valor: formatRoundCodigoDisplay(r) },
     { campo: 'generado', valor: formatFechaHoraPy(new Date()) },
   ]);
-  const fn = `MRV_Ronda_${formatRoundCodigoDisplay(round)}_${safeFilename(round.moduloLabel)}.xlsx`;
+  const fn = `MRV_Ronda_${formatRoundCodigoDisplay(r)}_${safeFilename(r.moduloLabel)}.xlsx`;
   const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
   const blob = new Blob([buf], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -153,12 +156,14 @@ export function downloadRoundReportExcel(
 export function downloadRoundReportPdf(
   round: RoundMonitoring,
   summary: RoundSummary,
-  evaluation: RoundEvaluation
+  evaluation: RoundEvaluation,
+  personnel?: RoundPersonnelHints
 ) {
+  const r = enrichRoundPersonnel(round, personnel);
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const aprobado = evaluation.aprobado;
   const statusColor: [number, number, number] = aprobado ? [22, 101, 52] : [180, 83, 9];
-  const roundId = formatRoundCodigoDisplay(round);
+  const roundId = formatRoundCodigoDisplay(r);
 
   doc.setFillColor(0, 85, 164);
   doc.rect(0, 0, 210, 34, 'F');
@@ -168,7 +173,7 @@ export function downloadRoundReportPdf(
   doc.text('M R V — Informe de ronda', 14, 11);
   doc.setFontSize(11);
   doc.setFont('helvetica', 'normal');
-  doc.text(round.moduloLabel, 14, 19);
+  doc.text(r.moduloLabel, 14, 19);
   doc.setFontSize(9);
   doc.text(`ID ${roundId}`, 14, 26);
 
@@ -194,13 +199,13 @@ export function downloadRoundReportPdf(
     startY: y,
     head: [['Campo', 'Valor']],
     body: [
-      ['Entrevistador', round.entrevistador || round.responsable || '—'],
-      ['Equipo / brigadistas', equipoLabel(round)],
-      ['Barrio de la ronda', round.barrio || round.moduloLabel],
-      ['Región', round.region],
-      ['Distrito', round.distrito],
-      ['Servicio de salud', round.servicio || '—'],
-      ['Responsable', round.responsable || '—'],
+      ['Entrevistador', r.entrevistador || r.responsable || '—'],
+      ['Equipo / brigadistas', equipoLabel(r)],
+      ['Barrio de la ronda', r.barrio || r.moduloLabel],
+      ['Región', r.region],
+      ['Distrito', r.distrito],
+      ['Servicio de salud', r.servicio || '—'],
+      ['Responsable', r.responsable || '—'],
     ],
     theme: 'plain',
     headStyles: { fillColor: [240, 244, 248], textColor: [30, 41, 59], fontSize: 8, fontStyle: 'bold' },
@@ -237,13 +242,13 @@ export function downloadRoundReportPdf(
   autoTable(doc, {
     startY: finalY + 6,
     head: [['Casa', 'Est.', 'Detalle visita', 'Niño/a', 'Doc.', 'Vac.']],
-    body: buildDetalleFilas(round).map((r) => [
-      String(r.casa),
-      r.estado,
-      r.estado_detalle.slice(0, 36),
-      r.nino.slice(0, 22),
-      r.documento,
-      r.vacunado,
+    body: buildDetalleFilas(r).map((row) => [
+      String(row.casa),
+      row.estado,
+      row.estado_detalle.slice(0, 36),
+      row.nino.slice(0, 22),
+      row.documento,
+      row.vacunado,
     ]),
     theme: 'striped',
     headStyles: { fillColor: [0, 85, 164], fontSize: 7.5 },
@@ -251,7 +256,7 @@ export function downloadRoundReportPdf(
     margin: { left: 14, right: 14 },
   });
 
-  const fn = `MRV_Ronda_${roundId}_${safeFilename(round.moduloLabel)}.pdf`;
+  const fn = `MRV_Ronda_${roundId}_${safeFilename(r.moduloLabel)}.pdf`;
   const blob = doc.output('blob');
   void saveBlobAsFile(fn, blob, 'application/pdf');
 }

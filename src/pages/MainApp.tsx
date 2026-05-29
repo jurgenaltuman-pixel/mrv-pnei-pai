@@ -1150,7 +1150,7 @@ export default function MainApp() {
           <div className="p-2.5 sm:p-4 lg:p-6 pb-20 max-lg:pb-[calc(5.25rem+env(safe-area-inset-bottom))] w-full box-border max-lg:px-3">
             <RoundMonitoringFlow
                 userId={user.id}
-                entrevistadorNombre={user.nombre || responsable}
+                entrevistadorNombre={user.nombre || responsable || user.email}
                 resumeRoundId={resumeRoundId}
                 onRoundsChanged={() => setRoundsDockKey((k) => k + 1)}
                 onActiveRoundChange={setActiveRoundId}
@@ -1166,7 +1166,7 @@ export default function MainApp() {
                   distritoNombre,
                   servicioNombre,
                   barrio,
-                  responsable: responsable || null,
+                  responsable: responsable || user.nombre || user.email || null,
                 }}
                 canGuardarNino={canGuardarNinoMonitoreo}
                 onGuardarNinoEnCasa={() => {

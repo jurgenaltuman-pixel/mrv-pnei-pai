@@ -1,5 +1,6 @@
 import { downloadRoundReportExcel, downloadRoundReportPdf } from '@/lib/export-round-report';
 import { evaluateRoundMonitoring } from '@/lib/round-evaluation';
+import { enrichRoundPersonnel } from '@/lib/round-report-meta';
 import {
   fetchRoundHistoryDetail,
   type RoundHistoryRow,
@@ -42,8 +43,8 @@ function buildSyntheticSnapshot(row: RoundHistoryRow): RoundHistorySnapshot {
     distrito: row.assigned_distrito || '',
     servicio: row.assigned_servicio || null,
     barrio: row.barrio || row.nombre,
-    responsable: row.responsable || null,
-    entrevistador: row.entrevistador || row.responsable || null,
+    responsable: row.responsable || row.display_name || null,
+    entrevistador: row.entrevistador || row.responsable || row.display_name || null,
     colaboradores: row.colaboradores || [],
     colaboradorUserIds: [],
     ultimaCasaResumen: null,
@@ -52,17 +53,34 @@ function buildSyntheticSnapshot(row: RoundHistoryRow): RoundHistorySnapshot {
   return { round, summary, evaluation };
 }
 
-function parseSnapshot(raw: unknown): RoundHistorySnapshot | null {
+function parseSnapshot(raw: unknown, row?: RoundHistoryRow): RoundHistorySnapshot | null {
   if (!raw || typeof raw !== 'object') return null;
   const o = raw as RoundHistorySnapshot;
   if (!o.round || !o.summary || !o.evaluation) return null;
-  return o;
+  return {
+    ...o,
+    round: enrichRoundPersonnel(o.round, {
+      entrevistadorNombre: row?.entrevistador,
+      responsable: row?.responsable,
+      colaboradores: row?.colaboradores,
+      displayNameFallback: row?.display_name || row?.email,
+    }),
+  };
+}
+
+function personnelHints(row: RoundHistoryRow) {
+  return {
+    entrevistadorNombre: row.entrevistador,
+    responsable: row.responsable,
+    colaboradores: row.colaboradores,
+    displayNameFallback: row.display_name || row.email,
+  };
 }
 
 async function loadSnapshot(row: RoundHistoryRow, admin?: boolean): Promise<RoundHistorySnapshot> {
   const { data, error } = await fetchRoundHistoryDetail(row.id, admin);
   if (!error && data?.snapshot) {
-    const parsed = parseSnapshot(data.snapshot);
+    const parsed = parseSnapshot(data.snapshot, row);
     if (parsed) return parsed;
   }
   return buildSyntheticSnapshot(row);
@@ -70,10 +88,10 @@ async function loadSnapshot(row: RoundHistoryRow, admin?: boolean): Promise<Roun
 
 export async function downloadRoundHistoryExcel(row: RoundHistoryRow, admin?: boolean): Promise<void> {
   const { round, summary, evaluation } = await loadSnapshot(row, admin);
-  downloadRoundReportExcel(round, summary, evaluation);
+  downloadRoundReportExcel(round, summary, evaluation, personnelHints(row));
 }
 
 export async function downloadRoundHistoryPdf(row: RoundHistoryRow, admin?: boolean): Promise<void> {
   const { round, summary, evaluation } = await loadSnapshot(row, admin);
-  downloadRoundReportPdf(round, summary, evaluation);
+  downloadRoundReportPdf(round, summary, evaluation, personnelHints(row));
 }

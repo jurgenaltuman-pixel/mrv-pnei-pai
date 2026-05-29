@@ -243,15 +243,32 @@ export default function RoundMonitoringFlow({
   );
 
   const aplicarUbicacionARonda = useCallback(
-    (r: RoundMonitoring): RoundMonitoring => ({
-      ...r,
-      region: location.regionNombre || r.region,
-      distrito: location.distritoNombre || r.distrito,
-      servicio: location.servicioNombre || null,
-      barrio: location.barrio.trim() || r.barrio,
-      responsable: location.responsable,
-    }),
-    [location]
+    (r: RoundMonitoring): RoundMonitoring => {
+      const eq = equipoToRoundFields(equipoUsuarios);
+      const responsable =
+        location.responsable?.trim() ||
+        r.responsable?.trim() ||
+        entrevistadorNombre?.trim() ||
+        null;
+      const entrevistador =
+        entrevistadorNombre?.trim() ||
+        r.entrevistador?.trim() ||
+        responsable ||
+        null;
+      return {
+        ...r,
+        region: location.regionNombre || r.region,
+        distrito: location.distritoNombre || r.distrito,
+        servicio: location.servicioNombre || r.servicio,
+        barrio: location.barrio.trim() || r.barrio,
+        responsable,
+        entrevistador,
+        colaboradores: eq.colaboradores.length > 0 ? eq.colaboradores : r.colaboradores,
+        colaboradorUserIds:
+          eq.colaboradorUserIds.length > 0 ? eq.colaboradorUserIds : r.colaboradorUserIds,
+      };
+    },
+    [location, entrevistadorNombre, equipoUsuarios]
   );
 
   const canStart = barrio.trim().length >= 2;
@@ -275,11 +292,7 @@ export default function RoundMonitoringFlow({
 
   const persist = useCallback(
     async (r: RoundMonitoring) => {
-      const normalized = ensureRoundCodigo({
-        ...r,
-        userId,
-        ...equipoToRoundFields(equipoUsuarios),
-      });
+      const normalized = ensureRoundCodigo(aplicarUbicacionARonda({ ...r, userId }));
       setRound(normalized);
       await roundMonitoringStorage.save(normalized);
       const syncErr = await syncRoundDraftToServer(normalized);
@@ -289,7 +302,7 @@ export default function RoundMonitoringFlow({
       onRoundsChanged?.();
       await refreshActiveDrafts();
     },
-    [userId, equipoUsuarios, onRoundsChanged, refreshActiveDrafts]
+    [userId, aplicarUbicacionARonda, onRoundsChanged, refreshActiveDrafts]
   );
 
   const notifyJornada = useCallback(
@@ -657,14 +670,19 @@ export default function RoundMonitoringFlow({
   const casaEnEdicion =
     round?.fase === 'edit-casa' ? round.casas.find((c) => c.numero === round.casaActiva && c.guardada) : null;
 
+  const roundParaInforme = useMemo(
+    () => (round ? aplicarUbicacionARonda(round) : null),
+    [round, aplicarUbicacionARonda]
+  );
+
   const handleExportExcel = () => {
-    if (!round || !summary || !evaluation) return;
-    downloadRoundReportExcel(round, summary, evaluation);
+    if (!roundParaInforme || !summary || !evaluation) return;
+    downloadRoundReportExcel(roundParaInforme, summary, evaluation);
   };
 
   const handleExportPdf = () => {
-    if (!round || !summary || !evaluation) return;
-    downloadRoundReportPdf(round, summary, evaluation);
+    if (!roundParaInforme || !summary || !evaluation) return;
+    downloadRoundReportPdf(roundParaInforme, summary, evaluation);
   };
 
   useEffect(() => {
@@ -684,23 +702,24 @@ export default function RoundMonitoringFlow({
       completadaAt: round.completedAt ?? Date.now(),
     };
     const stats = registrarRondaCompletada(userId, item);
+    const roundHist = aplicarUbicacionARonda(round);
     void saveRoundHistoryToServer({
-      roundLocalId: round.id,
-      roundCodigo: round.codigo,
-      moduloLabel: round.moduloLabel,
-      region: round.region,
-      distrito: round.distrito,
-      servicio: round.servicio,
-      barrio: round.barrio,
-      responsable: round.responsable,
-      entrevistador: round.entrevistador,
-      colaboradores: round.colaboradores,
+      roundLocalId: roundHist.id,
+      roundCodigo: roundHist.codigo,
+      moduloLabel: roundHist.moduloLabel,
+      region: roundHist.region,
+      distrito: roundHist.distrito,
+      servicio: roundHist.servicio,
+      barrio: roundHist.barrio,
+      responsable: roundHist.responsable,
+      entrevistador: roundHist.entrevistador,
+      colaboradores: roundHist.colaboradores,
       item,
-      snapshot: { round, summary, evaluation },
+      snapshot: { round: roundHist, summary, evaluation },
     });
     notifyJornada(stats);
     setRondaRegistrada(true);
-  }, [round, summary, evaluation, rondaRegistrada, userId, notifyJornada]);
+  }, [round, summary, evaluation, rondaRegistrada, userId, notifyJornada, aplicarUbicacionARonda]);
 
   const cerrarNuevaRonda = async () => {
     if (round) {
