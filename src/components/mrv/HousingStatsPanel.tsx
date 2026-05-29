@@ -41,7 +41,7 @@ export default function HousingStatsPanel({ contador, variant = 'full', showHelp
             </div>
             <p className="text-3xl font-black text-success leading-none">{abiertas}</p>
             <p className="text-[10px] text-muted-foreground mt-1.5 leading-snug">
-              Entró o hubo contacto (E + R)
+              Rechazo con adulto (R)
             </p>
             {total > 0 && (
               <p className="text-[10px] font-semibold text-success/80 mt-1">{pctAbiertas}% del total</p>
@@ -50,11 +50,13 @@ export default function HousingStatsPanel({ contador, variant = 'full', showHelp
           <div className="rounded-lg bg-destructive/10 border border-destructive/30 p-3">
             <div className="flex items-center gap-2 mb-1">
               <CircleX className="w-5 h-5 text-destructive" />
-              <span className="text-xs font-bold text-destructive">Fallida</span>
+              <span className="text-xs font-bold text-destructive">
+                Fallida <span className="font-semibold opacity-90">· cerradas</span>
+              </span>
             </div>
             <p className="text-3xl font-black text-destructive leading-none">{fallidas}</p>
             <p className="text-[10px] text-muted-foreground mt-1.5 leading-snug">
-              Casa cerrada o sin abordar (F + N)
+              Visitas registradas (E + N + F)
             </p>
             {total > 0 && (
               <p className="text-[10px] font-semibold text-destructive/80 mt-1">{pctFallidas}% del total</p>
@@ -83,7 +85,7 @@ export default function HousingStatsPanel({ contador, variant = 'full', showHelp
           </div>
           <div className="flex justify-between text-[10px] text-muted-foreground font-medium">
             <span>■ Abiertas {abiertas}</span>
-            <span>■ Fallidas {fallidas}</span>
+            <span>■ Cerradas (E+N+F) {fallidas}</span>
           </div>
         </div>
       )}
@@ -141,8 +143,8 @@ export default function HousingStatsPanel({ contador, variant = 'full', showHelp
             </p>
           ))}
           <p className="pt-2 border-t text-muted-foreground">
-            <strong className="text-foreground">Abiertas</strong> = E + R (hubo contacto o rechazo con adulto).{' '}
-            <strong className="text-foreground">Fallidas</strong> = F + N (casa cerrada, sin adulto o no efectiva).
+            <strong className="text-foreground">Abiertas</strong> = R (renuente / rechazo con adulto).{' '}
+            <strong className="text-foreground">Fallida · cerradas</strong> = E + N + F.
           </p>
         </div>
       )}

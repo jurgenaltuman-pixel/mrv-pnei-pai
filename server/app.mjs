@@ -1158,6 +1158,47 @@ export function createApp() {
     }
   });
 
+  /** Usuarios aprobados con la misma asignación territorial (para añadir a la ronda). */
+  app.get('/api/equipo/misma-asignacion', authMiddleware, async (req, res) => {
+    try {
+      const scope = await loadProfileScope(req.user.sub);
+      const region = String(req.query.region || scope?.assigned_region || '').trim();
+      const distrito = String(req.query.distrito || scope?.assigned_distrito || '').trim();
+      const servicio = String(req.query.servicio || scope?.assigned_servicio || '').trim();
+      if (!region || !distrito) {
+        res.json({ data: [] });
+        return;
+      }
+      const params = [req.user.sub, region, distrito];
+      let servicioSql = '';
+      if (servicio) {
+        servicioSql = ` AND lower(trim(coalesce(assigned_servicio, ''))) = lower(trim($${params.length + 1}))`;
+        params.push(servicio);
+      }
+      const { rows } = await query(
+        `SELECT user_id, display_name
+         FROM profiles
+         WHERE is_active = true AND is_approved = true
+           AND user_id != $1
+           AND lower(trim(coalesce(assigned_region, ''))) = lower(trim($2))
+           AND lower(trim(coalesce(assigned_distrito, ''))) = lower(trim($3))
+           ${servicioSql}
+           AND display_name IS NOT NULL AND trim(display_name) <> ''
+         ORDER BY display_name
+         LIMIT 40`,
+        params
+      );
+      res.json({
+        data: rows.map((r) => ({
+          user_id: String(r.user_id),
+          display_name: String(r.display_name).trim(),
+        })),
+      });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // --- Admin ---
   app.get('/api/admin/profiles-roles', authMiddleware, requireAdmin, async (_req, res) => {
     try {

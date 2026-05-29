@@ -55,24 +55,23 @@ export function sumarViviendas(c: HousingCounts): number {
 }
 
 /**
- * Resumen jornada: abiertas (contacto) vs fallidas (casa cerrada / no abordada).
- * - Abiertas = E + R
- * - Fallidas = F (casa cerrada / sin adulto) + N (no efectiva / puerta cerrada)
+ * Resumen jornada (informe MRV):
+ * - Cerradas (tarjeta «Fallida · cerradas») = E + N + F
+ * - Abiertas (rechazo con adulto) = R
  */
 export function resumenAbiertasCerradas(c: HousingCounts) {
-  const abiertas = c.efectivas + c.renuentes;
-  const fallidas = c.fallidas + c.noEfectivas;
+  const cerradas = c.efectivas + c.noEfectivas + c.fallidas;
+  const abiertas = c.renuentes;
   const total = sumarViviendas(c);
   return {
     abiertas,
-    fallidas,
-    /** @deprecated usar fallidas */
-    cerradas: fallidas,
+    /** Visitas E+N+F — etiqueta «Fallida · cerradas» en UI */
+    fallidas: cerradas,
+    cerradas,
     total,
     pctAbiertas: total > 0 ? Math.round((abiertas / total) * 100) : 0,
-    pctFallidas: total > 0 ? Math.round((fallidas / total) * 100) : 0,
-    /** @deprecated usar pctFallidas */
-    pctCerradas: total > 0 ? Math.round((fallidas / total) * 100) : 0,
+    pctFallidas: total > 0 ? Math.round((cerradas / total) * 100) : 0,
+    pctCerradas: total > 0 ? Math.round((cerradas / total) * 100) : 0,
   };
 }
 
