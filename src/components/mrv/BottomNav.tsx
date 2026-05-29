@@ -17,7 +17,7 @@ export default function BottomNav({ active, onChange, showAdmin }: Props) {
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-card/95 backdrop-blur-md border-t shadow-lg z-50 safe-area-bottom">
-      <div className="max-w-6xl mx-auto flex w-full">
+      <div className="w-full flex">
         {tabs.map(tab => (
           <button key={tab.id} onClick={() => onChange(tab.id)}
             className={`nav-tab ${active === tab.id ? 'nav-tab-active' : 'text-muted-foreground'}`}>

@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronUp, History, Play } from 'lucide-react';
+import { History, Play } from 'lucide-react';
 import { formatRoundCodigoDisplay } from '@/lib/round-codigo';
 import { formatFechaHoraPy } from '@/lib/format-fecha';
 import { rondaIncompleta } from '@/lib/round-resume';
 import { countCasasEfectivas } from '@/lib/croquis-housing';
 import { roundMonitoringStorage } from '@/services/roundMonitoringStorage';
 import type { RoundMonitoring } from '@/types/round-monitoring';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
 
 interface Props {
   userId: string;
@@ -14,7 +21,7 @@ interface Props {
   refreshKey?: number;
 }
 
-const MAX_VISIBLE = 6;
+const MAX_VISIBLE = 24;
 
 function fmtUltima(r: RoundMonitoring): string {
   return formatFechaHoraPy(new Date(r.updatedAt || r.createdAt));
@@ -31,7 +38,7 @@ export default function RecentRoundsDock({
   refreshKey = 0,
 }: Props) {
   const [rounds, setRounds] = useState<RoundMonitoring[]>([]);
-  const [expanded, setExpanded] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   const load = useCallback(async () => {
     const rows = await roundMonitoringStorage.listResumableForUser(userId, {
@@ -48,105 +55,87 @@ export default function RecentRoundsDock({
 
   if (!pendientes.length) return null;
 
-  const primary = pendientes[0];
-  const more = pendientes.length > 1;
-  const visibles = expanded ? pendientes.slice(0, MAX_VISIBLE) : [];
+  const visibles = pendientes.slice(0, MAX_VISIBLE);
   const restantes = pendientes.length - MAX_VISIBLE;
 
-  return (
-    <div className="fixed bottom-[calc(3.75rem+env(safe-area-inset-bottom))] left-0 right-0 z-40 px-2 sm:px-3 pointer-events-none">
-      <div className="max-w-6xl mx-auto pointer-events-auto">
-        <div
-          className={`rounded-xl border border-border/80 bg-card/90 backdrop-blur-sm shadow-md overflow-hidden transition-all ${
-            expanded ? 'max-w-md sm:max-w-lg ml-auto mr-0 sm:mr-2' : 'max-w-full'
-          }`}
-        >
-          <div className="flex items-stretch">
-            <button
-              type="button"
-              onClick={() => {
-                if (more) setExpanded((v) => !v);
-                else onResume(primary);
-              }}
-              className="flex-1 min-w-0 flex items-center gap-2 px-2.5 py-2 text-left sm:px-3"
-            >
-              <History className="w-3.5 h-3.5 text-primary shrink-0 opacity-80" />
-              <span className="min-w-0 flex-1">
-                <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-                  {pendientes.length === 1 ? 'Ronda pendiente' : `${pendientes.length} recientes`}
-                </span>
-                <span className="text-[11px] sm:text-xs font-semibold truncate block text-foreground">
-                  {primary.moduloLabel}
-                </span>
-                <span className="text-[9px] sm:text-[10px] text-muted-foreground font-mono truncate block">
-                  {formatRoundCodigoDisplay(primary)} · {countCasasEfectivas(primary.casas)}/{primary.totalCasas} E
-                </span>
-                <span className="text-[9px] text-muted-foreground truncate block">
-                  Última vez: {fmtUltima(primary)}
-                </span>
-              </span>
-            </button>
-            {more ? (
-              <button
-                type="button"
-                onClick={() => setExpanded((v) => !v)}
-                className="shrink-0 px-2.5 border-l border-border/60 flex items-center text-muted-foreground hover:bg-muted/40"
-                aria-label={expanded ? 'Contraer' : 'Ver lista'}
-              >
-                {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => onResume(primary)}
-                className="shrink-0 px-3 border-l border-border/60 flex items-center text-primary hover:bg-primary/5"
-                aria-label="Continuar"
-              >
-                <Play className="w-4 h-4" />
-              </button>
-            )}
-          </div>
+  const handleChipClick = () => {
+    if (pendientes.length === 1) {
+      onResume(pendientes[0]);
+      return;
+    }
+    setSheetOpen(true);
+  };
 
-          {expanded && more && (
-            <ul className="border-t border-border/60 max-h-[min(38vh,220px)] overflow-y-auto overscroll-contain divide-y">
-              {visibles.map((r) => {
-                const eff = countCasasEfectivas(r.casas);
-                return (
-                  <li key={r.id}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onResume(r);
-                        setExpanded(false);
-                      }}
-                      className="w-full flex items-start gap-2 px-2.5 py-2 text-left hover:bg-muted/40 sm:px-3"
-                    >
-                      <Play className="w-3 h-3 text-primary shrink-0 mt-0.5" />
-                      <span className="min-w-0 flex-1">
-                        <span className="text-[11px] font-bold truncate block">{r.moduloLabel}</span>
-                        <span className="text-[9px] font-mono text-muted-foreground">
-                          {formatRoundCodigoDisplay(r)} · {eff}/{r.totalCasas} E
-                        </span>
-                        <span className="text-[9px] text-muted-foreground block">
-                          Inicio: {fmtInicio(r)}
-                        </span>
-                        <span className="text-[9px] text-muted-foreground block">
-                          Última vez: {fmtUltima(r)}
-                        </span>
+  const resumeFromSheet = (r: RoundMonitoring) => {
+    onResume(r);
+    setSheetOpen(false);
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={handleChipClick}
+        className="fixed bottom-[calc(3.85rem+env(safe-area-inset-bottom))] right-2.5 z-40 flex items-center gap-1 rounded-full border border-border/80 bg-card/95 backdrop-blur-sm shadow-md pl-2 pr-2.5 py-1.5 text-left hover:bg-muted/50 active:scale-[0.98]"
+        aria-label={
+          pendientes.length === 1
+            ? `Continuar ronda ${pendientes[0].moduloLabel}`
+            : `Ver ${pendientes.length} rondas recientes`
+        }
+      >
+        <History className="w-3.5 h-3.5 text-primary shrink-0" />
+        <span className="text-[10px] font-bold tabular-nums text-primary leading-none">
+          {pendientes.length}
+        </span>
+        <span className="text-[10px] font-semibold text-muted-foreground hidden sm:inline">
+          recientes
+        </span>
+      </button>
+
+      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+        <SheetContent
+          side="bottom"
+          className="rounded-t-2xl px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-4 max-h-[min(72vh,520px)] flex flex-col"
+        >
+          <SheetHeader className="text-left pb-2 shrink-0">
+            <SheetTitle className="text-base">Rondas recientes</SheetTitle>
+            <SheetDescription>
+              {pendientes.length} pendiente{pendientes.length === 1 ? '' : 's'} — elegí una para
+              continuar
+            </SheetDescription>
+          </SheetHeader>
+          <ul className="flex-1 min-h-0 overflow-y-auto overscroll-contain divide-y border-t border-border/60 -mx-1">
+            {visibles.map((r) => {
+              const eff = countCasasEfectivas(r.casas);
+              return (
+                <li key={r.id}>
+                  <button
+                    type="button"
+                    onClick={() => resumeFromSheet(r)}
+                    className="w-full flex items-start gap-2 px-2 py-2.5 text-left hover:bg-muted/40 rounded-lg"
+                  >
+                    <Play className="w-3.5 h-3.5 text-primary shrink-0 mt-0.5" />
+                    <span className="min-w-0 flex-1">
+                      <span className="text-sm font-bold truncate block">{r.moduloLabel}</span>
+                      <span className="text-[10px] font-mono text-muted-foreground">
+                        {formatRoundCodigoDisplay(r)} · {eff}/{r.totalCasas} E
                       </span>
-                    </button>
-                  </li>
-                );
-              })}
-              {restantes > 0 && (
-                <li className="px-3 py-1.5 text-[9px] text-center text-muted-foreground">
-                  +{restantes} más en este equipo
+                      <span className="text-[10px] text-muted-foreground block">
+                        Inicio: {fmtInicio(r)} · Última: {fmtUltima(r)}
+                      </span>
+                    </span>
+                  </button>
                 </li>
-              )}
-            </ul>
-          )}
-        </div>
-      </div>
-    </div>
+              );
+            })}
+            {restantes > 0 && (
+              <li className="px-2 py-2 text-[10px] text-center text-muted-foreground">
+                +{restantes} más en este equipo
+              </li>
+            )}
+          </ul>
+        </SheetContent>
+      </Sheet>
+    </>
   );
 }

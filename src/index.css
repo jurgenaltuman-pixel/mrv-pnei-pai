@@ -209,9 +209,9 @@
     @apply bg-card rounded-2xl shadow-sm border p-3 sm:p-4 mb-3;
   }
   .mrv-flow-container {
-    @apply w-full max-w-3xl mx-auto px-2.5 sm:px-4 pb-2 space-y-3 sm:space-y-4;
+    @apply w-full px-2.5 sm:px-4 lg:px-6 pb-2 space-y-3 sm:space-y-4;
     width: 100%;
-    max-width: min(48rem, 100%);
+    max-width: 100%;
     box-sizing: border-box;
   }
   .mrv-completed-strip {

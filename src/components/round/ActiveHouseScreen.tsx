@@ -157,9 +157,9 @@ function ActiveHouseScreen({
           <button
             type="button"
             onClick={onAddChild}
-            className="mrv-btn-primary"
+            className="inline-flex items-center gap-1.5 self-start px-3 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold shadow-sm active:scale-[0.98] disabled:opacity-50"
           >
-            <Plus className="w-6 h-6" />
+            <Plus className="w-4 h-4 shrink-0" />
             Añadir niños
           </button>
 

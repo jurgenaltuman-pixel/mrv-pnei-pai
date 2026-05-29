@@ -55,7 +55,7 @@ export function CampaignAppHeader({
 
   return (
     <header className="sticky top-0 z-40 border-b border-sky-200/70 dark:border-slate-700 bg-gradient-to-b from-white via-sky-50/50 to-sky-100/40 dark:from-slate-900 dark:via-slate-900 dark:to-slate-950 text-slate-900 dark:text-slate-100 shadow-[0_4px_24px_-4px_rgba(15,23,42,0.12)] backdrop-blur-md safe-area-top">
-      <div className="max-w-6xl mx-auto px-2.5 sm:px-4 py-2 sm:py-2.5">
+      <div className="w-full px-2.5 sm:px-4 lg:px-6 py-2 sm:py-2.5">
         <div className="grid grid-cols-[auto_1fr_auto] items-start gap-2 sm:gap-3">
           <div className="shrink-0 row-span-2 sm:row-span-1 self-center">
             <div className="h-11 w-11 sm:h-14 sm:w-14 rounded-full bg-white dark:bg-slate-800 ring-2 ring-sky-200/90 dark:ring-slate-600 shadow-md overflow-hidden flex items-center justify-center p-0.5">
