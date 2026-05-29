@@ -1,17 +1,30 @@
 import { memo } from 'react';
 import type { CasaMonitoreo } from '@/types/round-monitoring';
-import { CROQUIS_ESTADOS, countCasasEfectivas, getEstadoConfig } from '@/lib/croquis-housing';
-import { ChevronRight, ListChecks } from 'lucide-react';
+import {
+  CROQUIS_ESTADOS,
+  casaPermiteReedicionVisita,
+  countCasasEfectivas,
+  getEstadoConfig,
+} from '@/lib/croquis-housing';
+import { ChevronRight, ListChecks, Undo2 } from 'lucide-react';
 
 interface Props {
   casas: CasaMonitoreo[];
   metaEfectivas: number;
   onContinuarCasa: (numero: number) => void;
   onEditCasaGuardada?: (numero: number) => void;
+  onReabrirCasa?: (numero: number) => void;
   canEditCasasGuardadas?: boolean;
 }
 
-function CroquisMap({ casas, metaEfectivas, onContinuarCasa, onEditCasaGuardada, canEditCasasGuardadas }: Props) {
+function CroquisMap({
+  casas,
+  metaEfectivas,
+  onContinuarCasa,
+  onEditCasaGuardada,
+  onReabrirCasa,
+  canEditCasasGuardadas,
+}: Props) {
   const totalVisitadas = casas.length;
   const siguiente = casas.find((c) => !c.guardada);
   const visitadas = casas.filter((c) => c.guardada).length;
@@ -85,13 +98,21 @@ function CroquisMap({ casas, metaEfectivas, onContinuarCasa, onEditCasaGuardada,
       {visitadas > 0 && (
         <div className="mt-5 pt-4 border-t border-dashed mrv-completed-strip">
           <p className="text-[10px] text-muted-foreground mb-2">
-            Visitas registradas (recorrido físico; solo E suman en las {metaEfectivas} casillas verdes arriba)
+            Visitas registradas (solo E suman en meta).{' '}
+            <span className="font-semibold text-foreground">
+              N, F o R: tocá «Retroceder» para corregir la visita.
+            </span>
           </p>
           <div className="flex flex-wrap gap-2">
             {casas
               .filter((c) => c.guardada)
               .map((c) => {
                 const cfg = c.estado ? getEstadoConfig(c.estado) : null;
+                const puedeRetroceder =
+                  canEditCasasGuardadas &&
+                  c.estado &&
+                  casaPermiteReedicionVisita(c.estado) &&
+                  Boolean(onReabrirCasa);
                 const chip = (
                   <>
                     <img
@@ -107,6 +128,23 @@ function CroquisMap({ casas, metaEfectivas, onContinuarCasa, onEditCasaGuardada,
                     {c.estado && <span className={cfg?.colorClass}>{c.estado}</span>}
                   </>
                 );
+                if (puedeRetroceder) {
+                  return (
+                    <button
+                      key={c.numero}
+                      type="button"
+                      onClick={() => onReabrirCasa!(c.numero)}
+                      className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold border hover:ring-2 hover:ring-primary/40 ${
+                        cfg?.bgSoft ?? 'bg-muted'
+                      }`}
+                      title={`Retroceder y editar casa ${c.numero} (${c.estado})`}
+                    >
+                      {chip}
+                      <Undo2 className="w-3 h-3 shrink-0 opacity-80" aria-hidden />
+                      <span className="sr-only sm:not-sr-only sm:text-[10px]">Retroceder</span>
+                    </button>
+                  );
+                }
                 if (canEditCasasGuardadas && onEditCasaGuardada) {
                   return (
                     <button

@@ -2,7 +2,12 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { useToast } from '@/hooks/use-toast';
 import { useGeolocation } from '@/hooks/useGeolocation';
 import { parseCoordsFromMapsLink } from '@/lib/maps-coords';
-import { computeRoundSummary, countCasasEfectivas, requiereNinos } from '@/lib/croquis-housing';
+import {
+  casaPermiteReedicionVisita,
+  computeRoundSummary,
+  countCasasEfectivas,
+  requiereNinos,
+} from '@/lib/croquis-housing';
 import { requiereGpsEnVisita, usaUbicacionEncuestadorAsignada } from '@/lib/monitoreo-vacunacion';
 import {
   acumularJornada,
@@ -340,17 +345,20 @@ export default function RoundMonitoringFlow({
     toast({ title: 'Ronda iniciada', description: `${r.totalCasas} casas · ${nombre}` });
   };
 
-  const goToCasa = async (numero: number) => {
+  const goToCasa = async (numero: number, opts?: { reedit?: boolean }) => {
     if (!round) return;
     const casa = round.casas.find((c) => c.numero === numero);
-    if (!casa || casa.guardada) {
-      if (casa?.guardada) toast({ title: 'Casa ya guardada', description: `La casa ${numero} ya fue registrada.` });
+    if (!casa) return;
+    if (casa.guardada && !opts?.reedit) {
+      toast({ title: 'Casa ya guardada', description: `Usá «Retroceder» en la lista de visitas para editar.` });
       return;
     }
-    const siguiente = round.casas.find((c) => !c.guardada);
-    if (siguiente && siguiente.numero !== numero) {
-      toast({ title: 'Una casa a la vez', description: `Completá primero la casa ${siguiente.numero}` });
-      return;
+    if (!opts?.reedit) {
+      const siguiente = round.casas.find((c) => !c.guardada);
+      if (siguiente && siguiente.numero !== numero) {
+        toast({ title: 'Una casa a la vez', description: `Completá primero la casa ${siguiente.numero}` });
+        return;
+      }
     }
     setEstadoDraft(casa.estado ?? null);
     const next = { ...round, casaActiva: numero, fase: 'house' as const };
@@ -408,6 +416,33 @@ export default function RoundMonitoringFlow({
 
   const handleSaveHouse = async () => {
     if (!round || !casaActual || !estadoDraft) return;
+
+    if (casaActual.guardada) {
+      setSaving(true);
+      let updatedCasa: typeof casaActual = {
+        ...casaActual,
+        estado: estadoDraft,
+        guardada: true,
+        latitud: latFinal,
+        longitud: lngFinal,
+        guardadaAt: casaActual.guardadaAt ?? Date.now(),
+      };
+      const roundActualizado = aplicarUbicacionARonda(round);
+      try {
+        const sync = await syncCasaActualizada(roundActualizado, updatedCasa, isOnline, isAdmin);
+        updatedCasa = applySyncIdsToCasa(updatedCasa, sync);
+        onPendingSync?.();
+      } catch (e) {
+        console.error(e);
+      }
+      const casas = round.casas.map((c) => (c.numero === updatedCasa.numero ? updatedCasa : c));
+      await persist({ ...roundActualizado, casas, fase: 'croquis' });
+      setEstadoDraft(null);
+      setSaving(false);
+      toast({ title: `Casa ${updatedCasa.numero} actualizada` });
+      return;
+    }
+
     if (requiereNinos(estadoDraft) && casaActual.ninos.length < 1) {
       toast({
         title: 'Falta registrar niños',
@@ -501,6 +536,21 @@ export default function RoundMonitoringFlow({
     const casa = round.casas.find((c) => c.numero === numero && c.guardada);
     if (!casa?.estado) return;
     void persist({ ...round, casaActiva: numero, fase: 'edit-casa' });
+  };
+
+  const reabrirCasaGuardada = async (numero: number) => {
+    if (!round) return;
+    const casa = round.casas.find((c) => c.numero === numero && c.guardada);
+    if (!casa?.estado) return;
+    if (!casaPermiteReedicionVisita(casa.estado)) {
+      openEditCasaGuardada(numero);
+      return;
+    }
+    await goToCasa(numero, { reedit: true });
+    toast({
+      title: `Editando casa ${numero}`,
+      description: 'Podés cambiar estado, GPS o datos y guardar de nuevo.',
+    });
   };
 
   const handleSaveCasaEditada = async (casaEditada: CasaMonitoreo, nuevoEstado: CasaEstadoCode) => {
@@ -709,14 +759,29 @@ export default function RoundMonitoringFlow({
           onCancel={() => void persist({ ...round, fase: 'croquis' })}
           onSave={(casa, estado) => void handleSaveCasaEditada(casa, estado)}
           onPatchRegistro={patchRegistroEnRonda}
+          onReabrirVisita={
+            casaEnEdicion.estado && casaPermiteReedicionVisita(casaEnEdicion.estado)
+              ? () => void reabrirCasaGuardada(casaEnEdicion.numero)
+              : undefined
+          }
         />
       </div>
     );
   }
 
+  const modoReedicion = Boolean(casaActual?.guardada);
+
+  const volverAlCroquis = () => {
+    if (!round) return;
+    setEstadoDraft(null);
+    void persist({ ...round, fase: 'croquis' });
+  };
+
   const houseScreenProps = {
     round,
     casa: casaActual!,
+    modoReedicion,
+    onCancelReedicion: modoReedicion ? volverAlCroquis : undefined,
     ultimaCasaResumen: round.ultimaCasaResumen,
     estadoSeleccionado: estadoDraft,
     onEstadoChange: (code: CasaEstadoCode) => void handleEstadoChange(code),
@@ -767,6 +832,7 @@ export default function RoundMonitoringFlow({
           onContinuarCasa={(n) => void goToCasa(n)}
           canEditCasasGuardadas
           onEditCasaGuardada={openEditCasaGuardada}
+          onReabrirCasa={(n) => void reabrirCasaGuardada(n)}
         />
       </div>
     );

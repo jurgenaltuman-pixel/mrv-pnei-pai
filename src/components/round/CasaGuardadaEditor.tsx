@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Home, Pencil, Save, X } from 'lucide-react';
+import { Home, Pencil, Save, Undo2, X } from 'lucide-react';
 import EstadoCasaButtons from './EstadoCasaButtons';
 import RegistroEditDialog, { type RegistroEditFields } from '@/components/mrv/RegistroEditDialog';
 import { getEstadoConfig } from '@/lib/croquis-housing';
@@ -16,6 +16,7 @@ interface Props {
   onCancel: () => void;
   onSave: (casa: CasaMonitoreo, estado: CasaEstadoCode) => void;
   onPatchRegistro: (registroId: string, patch: Record<string, unknown>) => Promise<string | null>;
+  onReabrirVisita?: () => void;
 }
 
 export default function CasaGuardadaEditor({
@@ -27,6 +28,7 @@ export default function CasaGuardadaEditor({
   onCancel,
   onSave,
   onPatchRegistro,
+  onReabrirVisita,
 }: Props) {
   const [casa, setCasa] = useState(initialCasa);
   const [estado, setEstado] = useState<CasaEstadoCode>(initialCasa.estado!);
@@ -82,6 +84,17 @@ export default function CasaGuardadaEditor({
           <X className="w-4 h-4" /> Cerrar
         </button>
       </div>
+
+      {onReabrirVisita && (
+        <button
+          type="button"
+          onClick={onReabrirVisita}
+          className="w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border-2 border-primary/40 bg-primary/5 text-primary text-sm font-bold"
+        >
+          <Undo2 className="w-4 h-4 shrink-0" />
+          Retroceder al formulario de visita
+        </button>
+      )}
 
       {canEditRegistros && (
         <>

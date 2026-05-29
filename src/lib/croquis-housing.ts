@@ -66,6 +66,11 @@ export function getEstadoConfig(code: CasaEstadoCode) {
   return CROQUIS_ESTADOS.find((e) => e.code === code)!;
 }
 
+/** N, F y R: el brigadista puede volver al formulario de visita (GPS, estado, etc.). */
+export function casaPermiteReedicionVisita(code: CasaEstadoCode | null): boolean {
+  return code === 'N' || code === 'F' || code === 'R';
+}
+
 /** Casas efectivas (E) guardadas — único avance hacia la meta del módulo (X/20). */
 export function countCasasEfectivas(
   casas: { guardada: boolean; estado: CasaEstadoCode | null }[]

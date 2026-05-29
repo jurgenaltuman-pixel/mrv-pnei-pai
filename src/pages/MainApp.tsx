@@ -1147,7 +1147,7 @@ export default function MainApp() {
 
       <main className="flex-1 min-h-0 w-full pb-app box-border">
         {tab === 'registro' && user && (
-          <div className="p-2.5 sm:p-4 lg:p-6 pb-20 w-full box-border">
+          <div className="p-2.5 sm:p-4 lg:p-6 pb-20 max-lg:pb-[calc(5.25rem+env(safe-area-inset-bottom))] w-full box-border max-lg:px-3">
             <RoundMonitoringFlow
                 userId={user.id}
                 entrevistadorNombre={user.nombre || responsable}

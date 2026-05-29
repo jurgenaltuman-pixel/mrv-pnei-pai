@@ -25,6 +25,8 @@ interface LocationAssign {
 
 interface Props {
   round?: Pick<RoundMonitoring, 'codigo' | 'id'>;
+  modoReedicion?: boolean;
+  onCancelReedicion?: () => void;
   casa: CasaMonitoreo;
   estadoSeleccionado: CasaEstadoCode | null;
   ultimaCasaResumen: { numero: number; estado: CasaEstadoCode; ninos: number } | null;
@@ -57,6 +59,8 @@ function resumenNino(n: NinoCasa) {
 
 function ActiveHouseScreen({
   round,
+  modoReedicion = false,
+  onCancelReedicion,
   casa,
   estadoSeleccionado,
   ultimaCasaResumen,
@@ -86,6 +90,11 @@ function ActiveHouseScreen({
 
   return (
     <div className="space-y-4">
+      {modoReedicion && (
+        <div className="rounded-xl border border-primary/40 bg-primary/5 px-3 py-2 text-sm text-primary font-medium">
+          Editando visita guardada — corregí datos y guardá de nuevo.
+        </div>
+      )}
       <div className="mrv-panel">
         <div className="flex flex-wrap items-center gap-2">
           <Home className="w-6 h-6 text-primary shrink-0" />
@@ -103,7 +112,7 @@ function ActiveHouseScreen({
         </div>
       </div>
 
-      {!estadoYaMarcado ? (
+      {!estadoYaMarcado || modoReedicion ? (
         <EstadoCasaButtons
           titulo={
             ultimaCasaResumen && ultimaCasaResumen.numero < casa.numero
@@ -115,13 +124,15 @@ function ActiveHouseScreen({
         />
       ) : (
         <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={onQuitarEstado}
-            className="text-xs text-muted-foreground underline"
-          >
-            Cambiar estado
-          </button>
+          {onQuitarEstado && (
+            <button
+              type="button"
+              onClick={onQuitarEstado}
+              className="text-xs text-muted-foreground underline"
+            >
+              Cambiar estado
+            </button>
+          )}
         </div>
       )}
 
@@ -180,7 +191,7 @@ function ActiveHouseScreen({
                       <span className="text-muted-foreground text-xs mt-0.5">CI {n.documento}</span>
                       <span className="text-muted-foreground text-xs">{resumenNino(n)}</span>
                     </div>
-                    {onEditNino && !casa.guardada && (
+                    {onEditNino && (!casa.guardada || modoReedicion) && (
                       <button
                         type="button"
                         onClick={() => onEditNino(n)}
@@ -201,8 +212,17 @@ function ActiveHouseScreen({
 
       <button type="button" disabled={!puedeGuardar || saving} onClick={onSaveHouse} className="mrv-btn-success">
         <Save className="w-5 h-5" />
-        {saving ? 'Guardando…' : etiquetaGuardarVisitaCasa(estadoSeleccionado)}
+        {saving
+          ? 'Guardando…'
+          : modoReedicion
+            ? 'Guardar cambios de la visita'
+            : etiquetaGuardarVisitaCasa(estadoSeleccionado)}
       </button>
+      {modoReedicion && onCancelReedicion && (
+        <button type="button" onClick={onCancelReedicion} className="mrv-btn-ghost">
+          Volver al croquis sin guardar
+        </button>
+      )}
     </div>
   );
 }
