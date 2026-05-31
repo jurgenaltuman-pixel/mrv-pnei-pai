@@ -10,20 +10,24 @@ En [Vercel → proyecto → Settings → Environment Variables](https://vercel.c
 
 | Variable | Descripción |
 |----------|-------------|
-| `DATABASE_URL` | PostgreSQL Aiven **operativa** (`pg-mrv-pai-mrv-pai-2026`, puerto **21502**) — login, perfiles, registros. **No** usar `mrvpai2` (eso es solo padrón shard 1). |
+| `DATABASE_URL` | PostgreSQL Aiven **login/registros**. Si la operativa **21502** está caída (disco lleno), usar **mrvpai2** (`…15143`) — mismo host que `PADRON_DEDICADO_URL`. |
 | `PADRON_DATABASE_URL` | Padrón shard **0** (`mrvpai1…`, ~393k filas) |
 | `PADRON_DEDICADO_URL` | Padrón shard **1** (`mrvpai2…`, ~422k filas). Sin esto la app solo encuentra la mitad del padrón. |
 
-Si el login falla con `ECONNREFUSED` en health: en [Aiven](https://console.aiven.io) el servicio operativo debe estar **Running** (no mezclar login en `mrvpai2`).
+Si el login falla con `ECONNREFUSED` en health: comprobar que `DATABASE_URL` apunta a una instancia **Running** en [Aiven](https://console.aiven.io). Con 21502 caída, login temporal en **mrvpai2** (4117 usuarios migrados desde Supabase con mismas contraseñas).
 
 ### Usuarios (login / registro)
 
-- **Sí:** altas y login van a **`DATABASE_URL` (operativa 21502)** → tablas `profiles`, `auth_credentials`, `user_roles`.
+- **Sí:** altas y login van a **`DATABASE_URL`** → tablas `profiles`, `auth_credentials`, `user_roles` (~4117 usuarios, hashes bcrypt de Supabase).
 - El padrón de niños **no** se guarda ahí; está en `mrvpai1` + `mrvpai2`.
 
-### Disco operativa al 100%
+### Disco operativa al 100% / `ECONNREFUSED 21502`
 
-Si en la operativa sigue existiendo `base_personas` (~600 MB duplicado), liberá espacio (padrón ya en los 2 shards):
+**Si ves `ECONNREFUSED`:** la operativa está **apagada** — ningún script desde la PC funciona hasta revivirla en Aiven.
+
+Guía paso a paso: **[AIVEN-OPERATIVA-DISCO-LLENO.md](./AIVEN-OPERATIVA-DISCO-LLENO.md)** (ampliar disco → reiniciar → `TRUNCATE base_personas`).
+
+Cuando `npm run aiven:ping-operational` diga **OK**:
 
 ```bash
 npm run aiven:free-operational-disk -- --confirm

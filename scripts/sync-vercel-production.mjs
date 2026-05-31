@@ -16,11 +16,16 @@ const deploy = process.argv.includes('--deploy');
 const force = process.argv.includes('--force');
 
 const dbUrl = process.env.DATABASE_URL || '';
-if (dbUrl.includes('mrvpai2') && !force) {
+const oldOp = process.env.OLD_DATABASE_URL || '';
+const operationalDown = oldOp.includes('21502') && dbUrl.includes('mrvpai2');
+if (dbUrl.includes('mrvpai2') && !force && !operationalDown) {
   console.error(
-    'DATABASE_URL apunta a mrvpai2 (solo padrón). Debe ser la operativa (21502). Corregí .env.local o usá --force.'
+    'DATABASE_URL apunta a mrvpai2. Si la operativa 21502 está caída, poné OLD_DATABASE_URL=21502 en .env.local o usá --force.'
   );
   process.exit(1);
+}
+if (operationalDown) {
+  console.log('⚠ Operativa 21502 caída: desplegando login en mrvpai2 (mismo host que padrón shard 1).\n');
 }
 
 const keys = [
