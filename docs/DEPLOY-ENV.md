@@ -10,9 +10,11 @@ En [Vercel → proyecto → Settings → Environment Variables](https://vercel.c
 
 | Variable | Descripción |
 |----------|-------------|
-| `DATABASE_URL` | PostgreSQL Aiven **operativa** (usuarios, login, registros, nómina) |
+| `DATABASE_URL` | PostgreSQL Aiven **operativa** (`pg-mrv-pai-mrv-pai-2026`, puerto **21502**) — login, perfiles, registros. **No** usar `mrvpai2` (eso es solo padrón shard 1). |
 | `PADRON_DATABASE_URL` | Padrón shard **0** (`mrvpai1…`, ~393k filas) |
 | `PADRON_DEDICADO_URL` | Padrón shard **1** (`mrvpai2…`, ~422k filas). Sin esto la app solo encuentra la mitad del padrón. |
+
+Si el login falla con `ECONNREFUSED` en health: en [Aiven](https://console.aiven.io) el servicio operativo debe estar **Running** (no mezclar login en `mrvpai2`).
 | `JWT_SECRET` | Clave larga aleatoria para tokens de sesión (misma en todos los deploys; si cambia, los APK viejos pierden sesión) |
 
 Opcional:

@@ -37,6 +37,7 @@
     "vercel:sync-supabase-env": "node scripts/sync-vercel-supabase-env.mjs",
     "vercel:sync-production": "node scripts/sync-vercel-production.mjs",
     "vercel:deploy": "node scripts/sync-vercel-production.mjs --deploy",
+    "aiven:ping-operational": "node scripts/aiven-ping-operational.mjs",
     "verify:org-barrios": "node scripts/verify-org-barrios.mjs",
     "aiven:bootstrap": "node scripts/aiven-bootstrap.mjs",
     "aiven:nomina-column": "node scripts/aiven-nomina-column.mjs",

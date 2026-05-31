@@ -13,6 +13,15 @@ const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 loadEnv(root);
 
 const deploy = process.argv.includes('--deploy');
+const force = process.argv.includes('--force');
+
+const dbUrl = process.env.DATABASE_URL || '';
+if (dbUrl.includes('mrvpai2') && !force) {
+  console.error(
+    'DATABASE_URL apunta a mrvpai2 (solo padrón). Debe ser la operativa (21502). Corregí .env.local o usá --force.'
+  );
+  process.exit(1);
+}
 
 const keys = [
   'DATABASE_URL',
