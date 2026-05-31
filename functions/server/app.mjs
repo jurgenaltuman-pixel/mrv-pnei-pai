@@ -8,7 +8,7 @@ import jwt from 'jsonwebtoken';
 import { randomUUID } from 'crypto';
 import { query, padronQuery, getPoolConfig } from './db.mjs';
 import { loginRateLimit, padronPageRateLimit, padronSearchRateLimit } from './rateLimit.mjs';
-import { authMiddleware, getJwtSecret, getUserRoles, requireAdmin } from './authUtils.mjs';
+import { authMiddleware, getJwtSecret, getUserRoles, requireAdmin, canAssignRole } from './authUtils.mjs';
 import { validateStrongPassword } from './passwordPolicy.mjs';
 import { filterRowsByProfileScope, hasProfileScopeAssignment } from './registroScope.mjs';
 import { listRegistrosMerged } from './registrosMerge.mjs';
@@ -24,6 +24,46 @@ async function loadProfileScope(userId) {
     [userId]
   );
   return rows[0] || null;
+}
+
+function resolveProfileEmail(profile) {
+  const em = String(profile?.email || '').trim().toLowerCase();
+  if (em.includes('@')) return em;
+  const un = String(profile?.username || '').trim().toLowerCase();
+  if (!un) return null;
+  return `${un.replace(/[^a-z0-9._-]/g, '') || 'user'}@mrv.import`;
+}
+
+async function upsertAuthForProfile(userId, email, passwordHash) {
+  const em = String(email || '').trim().toLowerCase();
+  if (!em.includes('@')) {
+    throw new Error('Email inválido en perfil');
+  }
+  const { rows: byEmail } = await query(
+    `SELECT user_id FROM auth_credentials WHERE lower(trim(email)) = $1 LIMIT 1`,
+    [em]
+  );
+  if (byEmail[0] && byEmail[0].user_id !== userId) {
+    await query(`DELETE FROM auth_credentials WHERE user_id = $1`, [byEmail[0].user_id]);
+  }
+  const { rows: cred } = await query(`SELECT user_id FROM auth_credentials WHERE user_id = $1 LIMIT 1`, [userId]);
+  if (cred[0]) {
+    await query('UPDATE auth_credentials SET password_hash = $1, email = $2 WHERE user_id = $3', [
+      passwordHash,
+      em,
+      userId,
+    ]);
+  } else {
+    await query(`INSERT INTO auth_credentials (user_id, email, password_hash) VALUES ($1,$2,$3)`, [
+      userId,
+      em,
+      passwordHash,
+    ]);
+  }
+  const { rows: pRow } = await query(`SELECT email FROM profiles WHERE user_id = $1`, [userId]);
+  if (!String(pRow[0]?.email || '').trim().includes('@')) {
+    await query(`UPDATE profiles SET email = $1, updated_at = now() WHERE user_id = $2`, [em, userId]);
+  }
 }
 
 let roundHistoryTableReady = false;
@@ -1427,9 +1467,12 @@ export function createApp() {
   app.get('/api/admin/profiles-roles', authMiddleware, requireAdmin, async (_req, res) => {
     try {
       const { rows: profiles } = await query(
-        `SELECT user_id, display_name, email, username, is_active, is_approved, approved_at,
-                assigned_region, assigned_distrito, assigned_servicio, assigned_barrio, scope_locked, created_at
-         FROM profiles ORDER BY created_at DESC LIMIT 5000`
+        `SELECT p.user_id, p.display_name, p.email, p.username, p.is_active, p.is_approved, p.approved_at,
+                p.assigned_region, p.assigned_distrito, p.assigned_servicio, p.assigned_barrio, p.scope_locked,
+                p.created_at, (ac.user_id IS NOT NULL) AS has_credentials
+         FROM profiles p
+         LEFT JOIN auth_credentials ac ON ac.user_id = p.user_id
+         ORDER BY p.created_at DESC LIMIT 5000`
       );
       const { rows: roles } = await query(`SELECT user_id, role FROM user_roles`);
       res.json({ profiles, roles });
@@ -1474,12 +1517,17 @@ export function createApp() {
         res.status(400).json({ error: 'Rol requerido' });
         return;
       }
-      if (role === 'super_admin' && !req.userRoles.includes('super_admin')) {
-        res.status(403).json({ error: 'Solo super admin' });
+      const targetRoles = await getUserRoles(req.params.userId);
+      const check = canAssignRole(req.userRoles, role, targetRoles);
+      if (!check.ok) {
+        res.status(403).json({ error: check.error });
         return;
       }
       await query('DELETE FROM user_roles WHERE user_id = $1', [req.params.userId]);
-      await query('INSERT INTO user_roles (user_id, role) VALUES ($1, $2)', [req.params.userId, role]);
+      await query('INSERT INTO user_roles (user_id, role) VALUES ($1, $2::app_role)', [
+        req.params.userId,
+        role,
+      ]);
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -1492,27 +1540,30 @@ export function createApp() {
       const temp = String(req.body?.temp_password || 'Cambio2026!');
       const hash = await bcrypt.hash(temp, 10);
       const { rows: prof } = await query(
-        `SELECT user_id, lower(trim(email)) AS email FROM profiles WHERE user_id = $1 LIMIT 1`,
+        `SELECT user_id, email, username FROM profiles WHERE user_id = $1 LIMIT 1`,
         [uid]
       );
-      if (!prof[0]?.email) {
+      if (!prof[0]) {
         res.status(404).json({ error: 'Usuario no encontrado' });
         return;
       }
-      const em = prof[0].email;
-      const { rows: cred } = await query(`SELECT user_id FROM auth_credentials WHERE user_id = $1 LIMIT 1`, [uid]);
-      if (cred[0]) {
-        await query('UPDATE auth_credentials SET password_hash = $1, email = $2 WHERE user_id = $3', [hash, em, uid]);
-      } else {
-        await query(`INSERT INTO auth_credentials (user_id, email, password_hash) VALUES ($1,$2,$3)`, [uid, em, hash]);
+      const em = resolveProfileEmail(prof[0]);
+      if (!em) {
+        res.status(400).json({ error: 'El perfil no tiene email ni usuario válido' });
+        return;
       }
-      await query(
-        `UPDATE auth_credentials SET password_hash = $1 WHERE lower(trim(email)) = $2 AND user_id <> $3`,
-        [hash, em, uid]
-      );
+      await upsertAuthForProfile(uid, em, hash);
+      const { rows: roleRows } = await query(`SELECT 1 FROM user_roles WHERE user_id = $1 LIMIT 1`, [uid]);
+      if (!roleRows[0]) {
+        await query(`INSERT INTO user_roles (user_id, role) VALUES ($1,'user')`, [uid]);
+      }
       await query('UPDATE profiles SET must_change_password = true, updated_at = now() WHERE user_id = $1', [uid]);
-      res.json({ ok: true, password: temp });
+      res.json({ ok: true, password: temp, email: em });
     } catch (e) {
+      if (e.code === '23505') {
+        res.status(409).json({ error: 'Conflicto de email con otro usuario. Contacte soporte.' });
+        return;
+      }
       res.status(500).json({ error: e.message });
     }
   });
@@ -1581,27 +1632,66 @@ export function createApp() {
         assigned_servicio,
         assigned_barrio,
       } = req.body || {};
-      const em = String(email || '').trim().toLowerCase();
+      const emReq = String(email || '').trim().toLowerCase();
       const un = String(username || '').trim().toLowerCase();
       const pwd = password || 'Cambio2026!';
-      if (!em.includes('@') || !un) {
+      if (!emReq.includes('@') || !un) {
         res.status(400).json({ error: 'Email y username requeridos' });
         return;
       }
-      const { rows: dup } = await query(
-        `SELECT ac.user_id FROM auth_credentials ac
-         JOIN profiles p ON p.user_id = ac.user_id
-         WHERE lower(trim(ac.email)) = $1 OR lower(trim(p.username)) = $2
+      const { rows: existingProf } = await query(
+        `SELECT user_id, email, username FROM profiles
+         WHERE lower(trim(username)) = $1 OR lower(trim(email)) = $2
          LIMIT 1`,
-        [em, un]
+        [un, emReq]
       );
-      if (dup[0]) {
-        res.status(409).json({ error: 'Usuario ya existe' });
-        return;
-      }
-      const userId = randomUUID();
       const hash = await bcrypt.hash(pwd, 10);
       const now = new Date().toISOString();
+
+      if (existingProf[0]) {
+        const userId = existingProf[0].user_id;
+        const loginEmail = resolveProfileEmail(existingProf[0]) || emReq;
+        const { rows: hasCred } = await query(
+          `SELECT user_id FROM auth_credentials WHERE user_id = $1 LIMIT 1`,
+          [userId]
+        );
+        if (hasCred[0]) {
+          res.status(409).json({
+            error: 'Usuario ya existe en la lista. Usá «Reset clave» para generar una contraseña nueva.',
+          });
+          return;
+        }
+        await query(
+          `UPDATE profiles SET
+             display_name = COALESCE(NULLIF($2,''), display_name),
+             is_active = true, is_approved = $3, must_change_password = true,
+             assigned_region = COALESCE($4, assigned_region),
+             assigned_distrito = COALESCE($5, assigned_distrito),
+             assigned_servicio = COALESCE($6, assigned_servicio),
+             assigned_barrio = COALESCE($7, assigned_barrio),
+             updated_at = $8
+           WHERE user_id = $1`,
+          [
+            userId,
+            displayName || un,
+            Boolean(is_approved),
+            assigned_region || null,
+            assigned_distrito || null,
+            assigned_servicio || null,
+            assigned_barrio || null,
+            now,
+          ]
+        );
+        await upsertAuthForProfile(userId, loginEmail, hash);
+        const { rows: roleRows } = await query(`SELECT 1 FROM user_roles WHERE user_id = $1 LIMIT 1`, [userId]);
+        if (!roleRows[0]) {
+          await query(`INSERT INTO user_roles (user_id, role) VALUES ($1,$2)`, [userId, role]);
+        }
+        res.json({ ok: true, user_id: userId, password: pwd, activated: true, email: loginEmail });
+        return;
+      }
+
+      const userId = randomUUID();
       await query(
         `INSERT INTO profiles (
            user_id, email, username, display_name, is_active, is_approved, must_change_password,
@@ -1610,7 +1700,7 @@ export function createApp() {
          ) VALUES ($1,$2,$3,$4,true,$5,true,$6,$7,$8,$9,false,$10,$10)`,
         [
           userId,
-          em,
+          emReq,
           un,
           displayName || un,
           Boolean(is_approved),
@@ -1621,7 +1711,7 @@ export function createApp() {
           now,
         ]
       );
-      await query(`INSERT INTO auth_credentials (user_id, email, password_hash) VALUES ($1,$2,$3)`, [userId, em, hash]);
+      await upsertAuthForProfile(userId, emReq, hash);
       await query(`INSERT INTO user_roles (user_id, role) VALUES ($1,$2)`, [userId, role]);
       res.json({ ok: true, user_id: userId, password: pwd });
     } catch (e) {
@@ -1764,12 +1854,28 @@ export function createApp() {
         );
         if (existing.length) {
           try {
+            const userId = existing[0].user_id;
             await query(
               `UPDATE profiles SET display_name = $1, assigned_region = $2, assigned_distrito = $3,
                assigned_servicio = $4, is_active = true, is_approved = true, updated_at = $5
                WHERE user_id = $6`,
-              [nombres, region, distrito, servicio, now, existing[0].user_id]
+              [nombres, region, distrito, servicio, now, userId]
             );
+            const { rows: hasCred } = await query(
+              `SELECT user_id FROM auth_credentials WHERE user_id = $1 LIMIT 1`,
+              [userId]
+            );
+            if (!hasCred[0]) {
+              const pwd = `Mrv${ci.replace(/\D/g, '').slice(-4).padStart(4, '0')}!`;
+              const hash = await bcrypt.hash(pwd, 10);
+              await upsertAuthForProfile(userId, email, hash);
+              const { rows: roleRows } = await query(`SELECT 1 FROM user_roles WHERE user_id = $1 LIMIT 1`, [
+                userId,
+              ]);
+              if (!roleRows[0]) {
+                await query(`INSERT INTO user_roles (user_id, role) VALUES ($1,'user')`, [userId]);
+              }
+            }
             updated++;
           } catch {
             errors++;

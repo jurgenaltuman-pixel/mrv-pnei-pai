@@ -3,7 +3,7 @@ import pg from 'pg';
 const { Pool } = pg;
 
 let mainPool;
-let padronPool;
+const padronPoolsByUrl = new Map();
 
 function isServerlessRuntime() {
   return Boolean(
@@ -18,7 +18,6 @@ function isAivenUrl(connectionString) {
   return connectionString.includes('aivencloud.com') || connectionString.includes('sslmode=require');
 }
 
-/** Pool pequeño por instancia en serverless; más grande en API persistente (Render/VM). */
 function resolvePoolMax() {
   if (process.env.PG_POOL_MAX) return Math.max(1, Number(process.env.PG_POOL_MAX) || 2);
   if (isServerlessRuntime()) return 2;
@@ -55,7 +54,43 @@ function createPool(connectionString) {
   return pool;
 }
 
-/** Auth, perfiles, registros, catálogo org en Aiven principal (no el padrón masivo). */
+function poolForUrl(connectionString) {
+  const key = normalizeConnectionString(connectionString);
+  if (!padronPoolsByUrl.has(key)) {
+    padronPoolsByUrl.set(key, createPool(connectionString));
+  }
+  return padronPoolsByUrl.get(key);
+}
+
+export function padronShardIndex(documento) {
+  const d = String(documento || '').trim();
+  if (!d.length) return 0;
+  return d.charCodeAt(d.length - 1) % 2;
+}
+
+export function getPadronPoolForShard(shard) {
+  const urls = getPadronShardUrls();
+  if (!urls.length) throw new Error('PADRON_DATABASE_URL no configurada');
+  const idx = Math.min(Math.max(0, shard), urls.length - 1);
+  return poolForUrl(urls[idx]);
+}
+
+export function getPadronPoolForDocumento(documento) {
+  return getPadronPoolForShard(padronShardIndex(documento));
+}
+
+/** URLs de shards de padrón (1 o 2 instancias Aiven). */
+export function getPadronShardUrls() {
+  const urls = [];
+  if (process.env.PADRON_DATABASE_URL) urls.push(process.env.PADRON_DATABASE_URL);
+  if (process.env.PADRON_DATABASE_URL_2) urls.push(process.env.PADRON_DATABASE_URL_2);
+  return urls;
+}
+
+export function isPadronSharded() {
+  return getPadronShardUrls().length > 1;
+}
+
 export function getPool() {
   if (mainPool) return mainPool;
   const connectionString = process.env.DATABASE_URL;
@@ -66,21 +101,29 @@ export function getPool() {
   return mainPool;
 }
 
-/** Solo base_personas (~625k). Instancia dedicada para no llenar la BD de operación. */
+/** Primer shard (instancia dedicada 1 GB o única). */
 export function getPadronPool() {
-  if (padronPool) return padronPool;
-  const connectionString = process.env.PADRON_DATABASE_URL || process.env.DATABASE_URL;
-  if (!connectionString) {
-    throw new Error('PADRON_DATABASE_URL o DATABASE_URL no configurada');
+  const urls = getPadronShardUrls();
+  if (!urls.length) {
+    throw new Error('PADRON_DATABASE_URL no configurada');
   }
-  padronPool = createPool(connectionString);
-  return padronPool;
+  return poolForUrl(urls[0]);
+}
+
+/** Todos los pools de padrón configurados. */
+export function getPadronPools() {
+  const urls = getPadronShardUrls();
+  if (!urls.length) {
+    throw new Error('PADRON_DATABASE_URL no configurada');
+  }
+  return urls.map((u) => poolForUrl(u));
 }
 
 export function getPoolConfig() {
   return {
     runtime: isServerlessRuntime() ? 'serverless' : 'persistent',
     maxPerInstance: resolvePoolMax(),
+    padronShards: getPadronShardUrls().length,
   };
 }
 
@@ -88,6 +131,79 @@ export async function query(text, params) {
   return getPool().query(text, params);
 }
 
+/** Consulta el primer shard (compat). */
 export async function padronQuery(text, params) {
-  return getPadronPool().query(text, params);
+  const { rows, errors } = await padronQueryAll(text, params);
+  if (!rows.length && errors?.length) {
+    throw new Error(errors.join(' | '));
+  }
+  return { rows };
+}
+
+/** Consulta todos los shards; concatena filas. */
+export async function padronQueryAll(text, params) {
+  const pools = getPadronPools();
+  const parts = await Promise.allSettled(pools.map((p) => p.query(text, params)));
+  const rows = [];
+  const errors = [];
+  for (const part of parts) {
+    if (part.status === 'fulfilled') rows.push(...part.value.rows);
+    else errors.push(part.reason?.message || String(part.reason));
+  }
+  if (!rows.length && errors.length === pools.length) {
+    throw new Error(errors.join(' | '));
+  }
+  return { rows, errors: errors.length ? errors : undefined };
+}
+
+/** Conteo total en todos los shards. */
+export async function padronCountAll() {
+  const { rows, errors } = await padronQueryAll('SELECT count(*)::int AS n FROM base_personas', []);
+  const total = rows.reduce((acc, r) => acc + (r.n || 0), 0);
+  return { total, errors };
+}
+
+/** Paginación global: reparte offset/limit entre shards por orden documento. */
+export async function padronPageAll(offset, limit, selectSql) {
+  const pools = getPadronPools();
+  const counts = [];
+  for (const p of pools) {
+    try {
+      const { rows } = await p.query('SELECT count(*)::int AS n FROM base_personas');
+      counts.push(rows[0]?.n ?? 0);
+    } catch {
+      counts.push(0);
+    }
+  }
+  let skip = Math.max(0, offset);
+  let need = limit;
+  const out = [];
+  for (let i = 0; i < pools.length && need > 0; i += 1) {
+    const cnt = counts[i];
+    if (skip >= cnt) {
+      skip -= cnt;
+      continue;
+    }
+    const take = Math.min(need, cnt - skip);
+    const { rows } = await pools[i].query(
+      `SELECT ${selectSql} FROM base_personas ORDER BY documento OFFSET $1 LIMIT $2`,
+      [skip, take]
+    );
+    out.push(...rows);
+    need -= rows.length;
+    skip = 0;
+  }
+  return out;
+}
+
+/** Busca documento en todos los shards (dedupe por documento). */
+export async function padronFindByDocumento(sql, params) {
+  const { rows } = await padronQueryAll(sql, params);
+  const seen = new Set();
+  return rows.filter((r) => {
+    const k = r.documento;
+    if (!k || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
 }

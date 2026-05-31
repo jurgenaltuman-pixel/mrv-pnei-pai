@@ -6,9 +6,21 @@ import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { randomUUID } from 'crypto';
-import { query, padronQuery, getPoolConfig } from './db.mjs';
+import {
+  query,
+  padronQuery,
+  padronQueryAll,
+  padronCountAll,
+  padronPageAll,
+  padronFindByDocumento,
+  getPoolConfig,
+  isPadronSharded,
+  getPadronPoolForDocumento,
+  getPadronPools,
+} from './db.mjs';
 import { loginRateLimit, padronPageRateLimit, padronSearchRateLimit } from './rateLimit.mjs';
-import { authMiddleware, getJwtSecret, getUserRoles, requireAdmin } from './authUtils.mjs';
+import { authMiddleware, getJwtSecret, getUserRoles, requireAdmin, requireReportAccess, canAssignRole } from './authUtils.mjs';
+import { resolveReportScope, filterRowsByReportScope, isNationalReporter } from './reportScope.mjs';
 import { validateStrongPassword } from './passwordPolicy.mjs';
 import { filterRowsByProfileScope, hasProfileScopeAssignment } from './registroScope.mjs';
 import { listRegistrosMerged } from './registrosMerge.mjs';
@@ -24,6 +36,48 @@ async function loadProfileScope(userId) {
     [userId]
   );
   return rows[0] || null;
+}
+
+/** Email usable para login (perfil migrado puede tener solo username). */
+function resolveProfileEmail(profile) {
+  const em = String(profile?.email || '').trim().toLowerCase();
+  if (em.includes('@')) return em;
+  const un = String(profile?.username || '').trim().toLowerCase();
+  if (!un) return null;
+  return `${un.replace(/[^a-z0-9._-]/g, '') || 'user'}@mrv.import`;
+}
+
+/** Crea o actualiza auth_credentials; desvincula email huérfano en otro user_id. */
+async function upsertAuthForProfile(userId, email, passwordHash) {
+  const em = String(email || '').trim().toLowerCase();
+  if (!em.includes('@')) {
+    throw new Error('Email inválido en perfil');
+  }
+  const { rows: byEmail } = await query(
+    `SELECT user_id FROM auth_credentials WHERE lower(trim(email)) = $1 LIMIT 1`,
+    [em]
+  );
+  if (byEmail[0] && byEmail[0].user_id !== userId) {
+    await query(`DELETE FROM auth_credentials WHERE user_id = $1`, [byEmail[0].user_id]);
+  }
+  const { rows: cred } = await query(`SELECT user_id FROM auth_credentials WHERE user_id = $1 LIMIT 1`, [userId]);
+  if (cred[0]) {
+    await query('UPDATE auth_credentials SET password_hash = $1, email = $2 WHERE user_id = $3', [
+      passwordHash,
+      em,
+      userId,
+    ]);
+  } else {
+    await query(`INSERT INTO auth_credentials (user_id, email, password_hash) VALUES ($1,$2,$3)`, [
+      userId,
+      em,
+      passwordHash,
+    ]);
+  }
+  const { rows: pRow } = await query(`SELECT email FROM profiles WHERE user_id = $1`, [userId]);
+  if (!String(pRow[0]?.email || '').trim().includes('@')) {
+    await query(`UPDATE profiles SET email = $1, updated_at = now() WHERE user_id = $2`, [em, userId]);
+  }
 }
 
 let roundHistoryTableReady = false;
@@ -118,6 +172,24 @@ function participantIdsForRound(ownerId, round) {
   return [...ids];
 }
 
+async function enrichRoundTeamNames(round) {
+  if (!round || typeof round !== 'object') return round;
+  const ids = [...new Set((round.colaboradorUserIds || []).map(String).filter(Boolean))];
+  if (!ids.length) return round;
+  const { rows } = await query(
+    `SELECT user_id, display_name, username FROM profiles WHERE user_id = ANY($1::uuid[])`,
+    [ids]
+  );
+  const nameById = new Map(
+    rows.map((r) => [
+      String(r.user_id),
+      String(r.display_name || r.username || '').trim(),
+    ])
+  );
+  const colaboradores = ids.map((id) => nameById.get(id) || '').filter(Boolean);
+  return { ...round, colaboradores, colaboradorUserIds: ids };
+}
+
 function mapRoundHistoryRow(row) {
   const completada = row.completada_at ? new Date(row.completada_at).getTime() : Date.now();
   return {
@@ -200,18 +272,22 @@ export function createApp() {
       await query('SELECT 1');
       let padronCount = null;
       let padronErr = null;
+      let padronShardErrors = null;
       try {
-        const { rows } = await padronQuery('SELECT count(*)::int AS n FROM base_personas');
-        padronCount = rows[0]?.n ?? 0;
+        const { total, errors } = await padronCountAll();
+        padronCount = total;
+        padronShardErrors = errors;
       } catch (e) {
         padronErr = e.message;
       }
       res.json({
         ok: true,
         db: 'aiven',
-        padronSplit: Boolean(process.env.PADRON_DATABASE_URL),
+        padronSplit: isPadronSharded(),
+        padronShards: getPoolConfig().padronShards,
         padronCount,
         padronErr,
+        padronShardErrors,
         capacity: {
           ...getPoolConfig(),
           targetConcurrentSessions: 800,
@@ -580,8 +656,14 @@ export function createApp() {
     try {
       const doc = String(req.query.doc || '').trim();
       const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
-      const { rows } = await padronQuery('SELECT * FROM buscar_padron_documento($1, $2)', [doc, limit]);
-      res.json({ data: rows });
+      const { rows } = await padronQueryAll('SELECT * FROM buscar_padron_documento($1, $2)', [doc, limit]);
+      const seen = new Set();
+      const data = rows.filter((r) => {
+        if (!r.documento || seen.has(r.documento)) return false;
+        seen.add(r.documento);
+        return true;
+      }).slice(0, limit);
+      res.json({ data });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
@@ -590,8 +672,14 @@ export function createApp() {
   app.get('/api/padron/search', authMiddleware, padronSearchRateLimit, async (req, res) => {
     try {
       const term = String(req.query.term || '').trim();
-      const { rows } = await padronQuery('SELECT * FROM search_personas_mejorada($1)', [term]);
-      res.json({ data: rows });
+      const { rows } = await padronQueryAll('SELECT * FROM search_personas_mejorada($1)', [term]);
+      const seen = new Set();
+      const data = rows.filter((r) => {
+        if (!r.documento || seen.has(r.documento)) return false;
+        seen.add(r.documento);
+        return true;
+      });
+      res.json({ data });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
@@ -614,13 +702,12 @@ export function createApp() {
         padronParams.push(tipo);
       }
       padronSql += ' LIMIT 1';
-      let { rows: padronRows } = await padronQuery(padronSql, padronParams);
+      let padronRows = await padronFindByDocumento(padronSql, padronParams);
       if (!padronRows[0] && tipo) {
-        const { rows: fallback } = await padronQuery(
+        padronRows = await padronFindByDocumento(
           `SELECT nombre, documento, edad_anos, edad_meses, historial_spr FROM base_personas WHERE documento = $1 LIMIT 1`,
           [doc]
         );
-        padronRows = fallback;
       }
       const p0 = padronRows[0];
       const { rows: visitas } = await query(
@@ -665,13 +752,12 @@ export function createApp() {
         params.push(tipo);
       }
       sql += ' LIMIT 1';
-      let { rows } = await padronQuery(sql, params);
+      let rows = await padronFindByDocumento(sql, params);
       if (!rows[0] && tipo) {
-        const fb = await padronQuery(
+        rows = await padronFindByDocumento(
           `SELECT ${PADRON_SELECT} FROM base_personas WHERE documento = $1 LIMIT 1`,
           [doc]
         );
-        rows = fb.rows;
       }
       res.json({ data: rows[0] || null });
     } catch (e) {
@@ -681,8 +767,8 @@ export function createApp() {
 
   app.get('/api/padron/count', authMiddleware, async (_req, res) => {
     try {
-      const { rows } = await padronQuery('SELECT count(*)::int AS count FROM base_personas');
-      res.json({ count: rows[0]?.count ?? 0 });
+      const { total } = await padronCountAll();
+      res.json({ count: total });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
@@ -692,11 +778,7 @@ export function createApp() {
     try {
       const offset = Math.max(0, Number(req.query.offset) || 0);
       const limit = Math.min(2000, Math.max(1, Number(req.query.limit) || 500));
-      const { rows } = await padronQuery(
-        `SELECT ${PADRON_SELECT}
-         FROM base_personas ORDER BY documento OFFSET $1 LIMIT $2`,
-        [offset, limit]
-      );
+      const rows = await padronPageAll(offset, limit, PADRON_SELECT);
       res.json({ data: rows });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -713,12 +795,12 @@ export function createApp() {
       }
       const term = String(normalized).trim();
       if (isNumeric) {
-        const { rows } = await padronQuery(
+        const rows = await padronFindByDocumento(
           `SELECT ${PADRON_SELECT}
            FROM base_personas WHERE documento = $1 OR documento LIKE $1 || '%' LIMIT $2`,
           [term, lim]
         );
-        res.json({ data: rows });
+        res.json({ data: rows.slice(0, lim) });
         return;
       }
       const toks = (tokens || []).filter((t) => String(t).length >= 1).slice(0, 6);
@@ -734,8 +816,8 @@ export function createApp() {
       });
       sql += parts.join(' AND ') + ` LIMIT $${params.length + 1}`;
       params.push(lim);
-      const { rows } = await padronQuery(sql, params);
-      res.json({ data: rows });
+      const rows = await padronFindByDocumento(sql, params);
+      res.json({ data: rows.slice(0, lim) });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
@@ -782,8 +864,14 @@ export function createApp() {
       sql += ` ORDER BY nombre LIMIT $${i}`;
       params.push(Math.min(200, lim * 4));
 
-      const { rows } = await padronQuery(sql, params);
-      res.json({ data: (rows || []).slice(0, lim) });
+      const { rows } = await padronQueryAll(sql, params);
+      const seen = new Set();
+      const merged = rows.filter((r) => {
+        if (!r.documento || seen.has(r.documento)) return false;
+        seen.add(r.documento);
+        return true;
+      });
+      res.json({ data: merged.slice(0, lim) });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
@@ -806,14 +894,15 @@ export function createApp() {
         res.status(400).json({ error: 'Ingresá CI o código temporal (iniciales + fecha de nacimiento).' });
         return;
       }
-      const { rows: dup } = await padronQuery(`SELECT id FROM base_personas WHERE documento = $1 LIMIT 1`, [
+      const dup = await padronFindByDocumento(`SELECT id FROM base_personas WHERE documento = $1 LIMIT 1`, [
         documento,
       ]);
       if (dup[0]) {
         res.status(409).json({ error: 'Ya existe una persona con ese documento/código en el padrón.' });
         return;
       }
-      const { rows } = await padronQuery(
+      const targetPool = getPadronPoolForDocumento(documento);
+      const { rows } = await targetPool.query(
         `INSERT INTO base_personas (
           nombre, tipo_documento, documento, fecha_nacimiento, sexo,
           region_sanitaria, distrito, servicio_salud, documento_madre, nombre_madre
@@ -875,24 +964,31 @@ export function createApp() {
     try {
       const limit = Math.min(10000, Math.max(1, Number(req.query.limit) || 2500));
       const roles = await getUserRoles(req.user.sub);
-      const privileged = roles.includes('admin') || roles.includes('super_admin');
       const scope = await loadProfileScope(req.user.sub);
+      const reportScope = resolveReportScope(scope, roles);
       let rows;
-      if (privileged) {
-        const fetchLimit = hasProfileScopeAssignment(scope)
-          ? Math.min(10000, limit * 4)
-          : Math.max(limit, 10000);
+      if (reportScope.mode !== 'own') {
+        const national = reportScope.mode === 'national';
+        const fetchLimit = Math.max(limit, 10000);
         ({ rows } = await query(
           `SELECT * FROM registros_vacunacion ORDER BY fecha_hora DESC LIMIT $1`,
           [fetchLimit]
         ));
-        const merged = await listRegistrosMerged({
-          aivenRows: rows,
-          scope,
-          limit,
-          forceNational: !hasProfileScopeAssignment(scope),
-        });
-        res.json({ data: merged.data, sources: merged.sources });
+        let data = rows;
+        if (reportScope.mode === 'regional') {
+          data = filterRowsByReportScope(rows, reportScope);
+        } else {
+          const merged = await listRegistrosMerged({
+            aivenRows: rows,
+            scope,
+            limit,
+            forceNational: national,
+          });
+          data = merged.data;
+          res.json({ data, sources: merged.sources, reportMode: reportScope.mode });
+          return;
+        }
+        res.json({ data: data.slice(0, limit), reportMode: reportScope.mode });
         return;
       }
       ({ rows } = await query(
@@ -905,12 +1001,17 @@ export function createApp() {
     }
   });
 
-  /** Listado para panel admin: nacional sin asignación; zonal si tiene región+distrito. */
-  app.get('/api/admin/registros', authMiddleware, requireAdmin, async (req, res) => {
+  /** Listado para dashboard: nacional (supervisor/admin) o regional. */
+  app.get('/api/admin/registros', authMiddleware, requireReportAccess, async (req, res) => {
     try {
       const limit = Math.min(10000, Math.max(1, Number(req.query.limit) || 10000));
       const scope = await loadProfileScope(req.user.sub);
-      const national = req.query.national === '1' || req.query.national === 'true';
+      const roles = req.userRoles || (await getUserRoles(req.user.sub));
+      const reportScope = resolveReportScope(scope, roles);
+      const national =
+        req.query.national === '1' ||
+        req.query.national === 'true' ||
+        reportScope.mode === 'national';
       const { rows: countRows } = await query(`SELECT count(*)::int AS n FROM registros_vacunacion`);
       const aivenTotal = countRows[0]?.n ?? 0;
       const supaTotal = await countRegistrosInSupabase();
@@ -919,12 +1020,25 @@ export function createApp() {
         `SELECT * FROM registros_vacunacion ORDER BY fecha_hora DESC LIMIT $1`,
         [fetchLimit]
       );
-      const merged = await listRegistrosMerged({
+      let merged = await listRegistrosMerged({
         aivenRows: rows,
         scope,
-        limit,
+        limit: fetchLimit,
         forceNational: national,
       });
+      if (reportScope.mode === 'regional') {
+        merged = {
+          ...merged,
+          data: filterRowsByReportScope(merged.data, reportScope).slice(0, limit),
+        };
+      } else if (!national) {
+        merged = {
+          ...merged,
+          data: filterRowsByReportScope(merged.data, reportScope).slice(0, limit),
+        };
+      } else {
+        merged = { ...merged, data: merged.data.slice(0, limit) };
+      }
       const totalNational = Math.max(aivenTotal, aivenTotal + supaTotal);
       res.json({
         data: merged.data,
@@ -933,7 +1047,8 @@ export function createApp() {
         totalSupabase: supaTotal,
         sources: merged.sources,
         scope: scope || null,
-        nationalView: national || !hasProfileScopeAssignment(scope),
+        nationalView: national,
+        reportMode: reportScope.mode,
       });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -1198,10 +1313,11 @@ export function createApp() {
          LIMIT $2`,
         [req.user.sub, MAX_ACTIVE_ROUNDS]
       );
-      const data = rows.map((r) => {
+      const data = [];
+      for (const r of rows) {
         const p = typeof r.payload === 'object' ? r.payload : JSON.parse(String(r.payload));
-        return { ...p, updatedAt: new Date(r.updated_at).getTime() };
-      });
+        data.push({ ...(await enrichRoundTeamNames(p)), updatedAt: new Date(r.updated_at).getTime() });
+      }
       res.json({ data });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -1307,15 +1423,21 @@ export function createApp() {
     }
   });
 
-  app.get('/api/admin/rounds/history', authMiddleware, requireAdmin, async (req, res) => {
+  app.get('/api/admin/rounds/history', authMiddleware, requireReportAccess, async (req, res) => {
     try {
       await ensureRoundHistoryTable();
       const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
+      const scope = await loadProfileScope(req.user.sub);
+      const roles = req.userRoles || (await getUserRoles(req.user.sub));
+      const reportScope = resolveReportScope(scope, roles);
       const clauses = [];
       const params = [];
       let idx = 1;
-      const region = String(req.query.region || '').trim();
+      let region = String(req.query.region || '').trim();
       const distrito = String(req.query.distrito || '').trim();
+      if (reportScope.mode === 'regional' && !region && scope?.assigned_region) {
+        region = String(scope.assigned_region).trim();
+      }
       const servicio = String(req.query.servicio || '').trim();
       const responsable = String(req.query.responsable || '').trim();
       const roundCodigo = String(req.query.round_codigo || '').trim();
@@ -1445,36 +1567,42 @@ export function createApp() {
     }
   });
 
-  /** Usuarios aprobados con la misma asignación territorial (para añadir a la ronda). */
+  /** Usuarios aprobados para sumar al equipo de la ronda (misma asignación o región para supervisores). */
   app.get('/api/equipo/misma-asignacion', authMiddleware, async (req, res) => {
     try {
       const scope = await loadProfileScope(req.user.sub);
+      const roles = await getUserRoles(req.user.sub);
       const region = String(req.query.region || scope?.assigned_region || '').trim();
       const distrito = String(req.query.distrito || scope?.assigned_distrito || '').trim();
       const servicio = String(req.query.servicio || scope?.assigned_servicio || '').trim();
-      if (!region || !distrito) {
+      if (!region) {
         res.json({ data: [] });
         return;
       }
-      const params = [req.user.sub, region, distrito];
-      let servicioSql = '';
-      if (servicio) {
-        servicioSql = ` AND lower(trim(coalesce(assigned_servicio, ''))) = lower(trim($${params.length + 1}))`;
-        params.push(servicio);
-      }
-      const { rows } = await query(
-        `SELECT user_id, display_name
+      const params = [req.user.sub, region];
+      let sql = `SELECT user_id, display_name, username
          FROM profiles
          WHERE is_active = true AND is_approved = true
            AND user_id != $1
-           AND lower(trim(coalesce(assigned_region, ''))) = lower(trim($2))
-           AND lower(trim(coalesce(assigned_distrito, ''))) = lower(trim($3))
-           ${servicioSql}
-           AND display_name IS NOT NULL AND trim(display_name) <> ''
-         ORDER BY display_name
-         LIMIT 40`,
-        params
-      );
+           AND lower(trim(coalesce(assigned_region, ''))) = lower(trim($2))`;
+      if (isNationalReporter(roles)) {
+        sql += ` AND display_name IS NOT NULL AND trim(display_name) <> '' ORDER BY display_name LIMIT 80`;
+      } else if (roles.includes('regional')) {
+        sql += ` AND display_name IS NOT NULL AND trim(display_name) <> '' ORDER BY display_name LIMIT 60`;
+      } else {
+        if (!distrito) {
+          res.json({ data: [] });
+          return;
+        }
+        params.push(distrito);
+        sql += ` AND lower(trim(coalesce(assigned_distrito, ''))) = lower(trim($3))`;
+        if (servicio) {
+          params.push(servicio);
+          sql += ` AND lower(trim(coalesce(assigned_servicio, ''))) = lower(trim($${params.length}))`;
+        }
+        sql += ` AND display_name IS NOT NULL AND trim(display_name) <> '' ORDER BY display_name LIMIT 40`;
+      }
+      const { rows } = await query(sql, params);
       res.json({
         data: rows.map((r) => ({
           user_id: String(r.user_id),
@@ -1490,9 +1618,12 @@ export function createApp() {
   app.get('/api/admin/profiles-roles', authMiddleware, requireAdmin, async (_req, res) => {
     try {
       const { rows: profiles } = await query(
-        `SELECT user_id, display_name, email, username, is_active, is_approved, approved_at,
-                assigned_region, assigned_distrito, assigned_servicio, assigned_barrio, scope_locked, created_at
-         FROM profiles ORDER BY created_at DESC LIMIT 5000`
+        `SELECT p.user_id, p.display_name, p.email, p.username, p.is_active, p.is_approved, p.approved_at,
+                p.assigned_region, p.assigned_distrito, p.assigned_servicio, p.assigned_barrio, p.scope_locked,
+                p.created_at, (ac.user_id IS NOT NULL) AS has_credentials
+         FROM profiles p
+         LEFT JOIN auth_credentials ac ON ac.user_id = p.user_id
+         ORDER BY p.created_at DESC LIMIT 5000`
       );
       const { rows: roles } = await query(`SELECT user_id, role FROM user_roles`);
       res.json({ profiles, roles });
@@ -1537,12 +1668,17 @@ export function createApp() {
         res.status(400).json({ error: 'Rol requerido' });
         return;
       }
-      if (role === 'super_admin' && !req.userRoles.includes('super_admin')) {
-        res.status(403).json({ error: 'Solo super admin' });
+      const targetRoles = await getUserRoles(req.params.userId);
+      const check = canAssignRole(req.userRoles, role, targetRoles);
+      if (!check.ok) {
+        res.status(403).json({ error: check.error });
         return;
       }
       await query('DELETE FROM user_roles WHERE user_id = $1', [req.params.userId]);
-      await query('INSERT INTO user_roles (user_id, role) VALUES ($1, $2)', [req.params.userId, role]);
+      await query('INSERT INTO user_roles (user_id, role) VALUES ($1, $2::app_role)', [
+        req.params.userId,
+        role,
+      ]);
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -1555,27 +1691,30 @@ export function createApp() {
       const temp = String(req.body?.temp_password || 'Cambio2026!');
       const hash = await bcrypt.hash(temp, 10);
       const { rows: prof } = await query(
-        `SELECT user_id, lower(trim(email)) AS email FROM profiles WHERE user_id = $1 LIMIT 1`,
+        `SELECT user_id, email, username FROM profiles WHERE user_id = $1 LIMIT 1`,
         [uid]
       );
-      if (!prof[0]?.email) {
+      if (!prof[0]) {
         res.status(404).json({ error: 'Usuario no encontrado' });
         return;
       }
-      const em = prof[0].email;
-      const { rows: cred } = await query(`SELECT user_id FROM auth_credentials WHERE user_id = $1 LIMIT 1`, [uid]);
-      if (cred[0]) {
-        await query('UPDATE auth_credentials SET password_hash = $1, email = $2 WHERE user_id = $3', [hash, em, uid]);
-      } else {
-        await query(`INSERT INTO auth_credentials (user_id, email, password_hash) VALUES ($1,$2,$3)`, [uid, em, hash]);
+      const em = resolveProfileEmail(prof[0]);
+      if (!em) {
+        res.status(400).json({ error: 'El perfil no tiene email ni usuario válido' });
+        return;
       }
-      await query(
-        `UPDATE auth_credentials SET password_hash = $1 WHERE lower(trim(email)) = $2 AND user_id <> $3`,
-        [hash, em, uid]
-      );
+      await upsertAuthForProfile(uid, em, hash);
+      const { rows: roleRows } = await query(`SELECT 1 FROM user_roles WHERE user_id = $1 LIMIT 1`, [uid]);
+      if (!roleRows[0]) {
+        await query(`INSERT INTO user_roles (user_id, role) VALUES ($1,'user')`, [uid]);
+      }
       await query('UPDATE profiles SET must_change_password = true, updated_at = now() WHERE user_id = $1', [uid]);
-      res.json({ ok: true, password: temp });
+      res.json({ ok: true, password: temp, email: em });
     } catch (e) {
+      if (e.code === '23505') {
+        res.status(409).json({ error: 'Conflicto de email con otro usuario. Contacte soporte.' });
+        return;
+      }
       res.status(500).json({ error: e.message });
     }
   });
@@ -1644,27 +1783,66 @@ export function createApp() {
         assigned_servicio,
         assigned_barrio,
       } = req.body || {};
-      const em = String(email || '').trim().toLowerCase();
+      const emReq = String(email || '').trim().toLowerCase();
       const un = String(username || '').trim().toLowerCase();
       const pwd = password || 'Cambio2026!';
-      if (!em.includes('@') || !un) {
+      if (!emReq.includes('@') || !un) {
         res.status(400).json({ error: 'Email y username requeridos' });
         return;
       }
-      const { rows: dup } = await query(
-        `SELECT ac.user_id FROM auth_credentials ac
-         JOIN profiles p ON p.user_id = ac.user_id
-         WHERE lower(trim(ac.email)) = $1 OR lower(trim(p.username)) = $2
+      const { rows: existingProf } = await query(
+        `SELECT user_id, email, username FROM profiles
+         WHERE lower(trim(username)) = $1 OR lower(trim(email)) = $2
          LIMIT 1`,
-        [em, un]
+        [un, emReq]
       );
-      if (dup[0]) {
-        res.status(409).json({ error: 'Usuario ya existe' });
-        return;
-      }
-      const userId = randomUUID();
       const hash = await bcrypt.hash(pwd, 10);
       const now = new Date().toISOString();
+
+      if (existingProf[0]) {
+        const userId = existingProf[0].user_id;
+        const loginEmail = resolveProfileEmail(existingProf[0]) || emReq;
+        const { rows: hasCred } = await query(
+          `SELECT user_id FROM auth_credentials WHERE user_id = $1 LIMIT 1`,
+          [userId]
+        );
+        if (hasCred[0]) {
+          res.status(409).json({
+            error: 'Usuario ya existe en la lista. Usá «Reset clave» para generar una contraseña nueva.',
+          });
+          return;
+        }
+        await query(
+          `UPDATE profiles SET
+             display_name = COALESCE(NULLIF($2,''), display_name),
+             is_active = true, is_approved = $3, must_change_password = true,
+             assigned_region = COALESCE($4, assigned_region),
+             assigned_distrito = COALESCE($5, assigned_distrito),
+             assigned_servicio = COALESCE($6, assigned_servicio),
+             assigned_barrio = COALESCE($7, assigned_barrio),
+             updated_at = $8
+           WHERE user_id = $1`,
+          [
+            userId,
+            displayName || un,
+            Boolean(is_approved),
+            assigned_region || null,
+            assigned_distrito || null,
+            assigned_servicio || null,
+            assigned_barrio || null,
+            now,
+          ]
+        );
+        await upsertAuthForProfile(userId, loginEmail, hash);
+        const { rows: roleRows } = await query(`SELECT 1 FROM user_roles WHERE user_id = $1 LIMIT 1`, [userId]);
+        if (!roleRows[0]) {
+          await query(`INSERT INTO user_roles (user_id, role) VALUES ($1,$2)`, [userId, role]);
+        }
+        res.json({ ok: true, user_id: userId, password: pwd, activated: true, email: loginEmail });
+        return;
+      }
+
+      const userId = randomUUID();
       await query(
         `INSERT INTO profiles (
            user_id, email, username, display_name, is_active, is_approved, must_change_password,
@@ -1673,7 +1851,7 @@ export function createApp() {
          ) VALUES ($1,$2,$3,$4,true,$5,true,$6,$7,$8,$9,false,$10,$10)`,
         [
           userId,
-          em,
+          emReq,
           un,
           displayName || un,
           Boolean(is_approved),
@@ -1684,7 +1862,7 @@ export function createApp() {
           now,
         ]
       );
-      await query(`INSERT INTO auth_credentials (user_id, email, password_hash) VALUES ($1,$2,$3)`, [userId, em, hash]);
+      await upsertAuthForProfile(userId, emReq, hash);
       await query(`INSERT INTO user_roles (user_id, role) VALUES ($1,$2)`, [userId, role]);
       res.json({ ok: true, user_id: userId, password: pwd });
     } catch (e) {
@@ -1759,7 +1937,8 @@ export function createApp() {
       }
       let inserted = 0;
       for (const r of batch) {
-        await padronQuery(
+        const pool = getPadronPoolForDocumento(r.documento);
+        await pool.query(
           `INSERT INTO base_personas (nombre, tipo_documento, documento, fecha_nacimiento, sexo, region_sanitaria, distrito, servicio_salud, documento_madre, nombre_madre)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
            ON CONFLICT (documento) DO UPDATE SET
@@ -1782,7 +1961,9 @@ export function createApp() {
 
   app.delete('/api/admin/padron/all', authMiddleware, requireAdmin, async (_req, res) => {
     try {
-      await padronQuery('DELETE FROM base_personas');
+      for (const pool of getPadronPools()) {
+        await pool.query('TRUNCATE base_personas RESTART IDENTITY CASCADE');
+      }
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -1827,12 +2008,28 @@ export function createApp() {
         );
         if (existing.length) {
           try {
+            const userId = existing[0].user_id;
             await query(
               `UPDATE profiles SET display_name = $1, assigned_region = $2, assigned_distrito = $3,
                assigned_servicio = $4, is_active = true, is_approved = true, updated_at = $5
                WHERE user_id = $6`,
-              [nombres, region, distrito, servicio, now, existing[0].user_id]
+              [nombres, region, distrito, servicio, now, userId]
             );
+            const { rows: hasCred } = await query(
+              `SELECT user_id FROM auth_credentials WHERE user_id = $1 LIMIT 1`,
+              [userId]
+            );
+            if (!hasCred[0]) {
+              const pwd = `Mrv${ci.replace(/\D/g, '').slice(-4).padStart(4, '0')}!`;
+              const hash = await bcrypt.hash(pwd, 10);
+              await upsertAuthForProfile(userId, email, hash);
+              const { rows: roleRows } = await query(`SELECT 1 FROM user_roles WHERE user_id = $1 LIMIT 1`, [
+                userId,
+              ]);
+              if (!roleRows[0]) {
+                await query(`INSERT INTO user_roles (user_id, role) VALUES ($1,'user')`, [userId]);
+              }
+            }
             updated++;
           } catch {
             errors++;

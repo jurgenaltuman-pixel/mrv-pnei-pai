@@ -1,29 +1,51 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, CheckCircle2, Loader2, X, WifiOff, Wifi, Signal } from 'lucide-react';
 import { isNativeApp } from '@/lib/capacitor-platform';
+import {
+  estimateOrgDownload,
+  estimatePadronDownload,
+  estimateTotalOfflineDownload,
+  etaRemainingFromProgress,
+  type OfflineNetworkKind,
+} from '@/lib/padron-download-estimates';
 import { mrvPadronIndexed, type PadronDownloadProgress } from '@/services/mrvPadronIndexed';
 import { syncOrgStructureOffline, type OrgSyncResult } from '@/services/mrvOrgSync';
 import { useToast } from '@/hooks/use-toast';
 
 const DISMISS_KEY = 'mrv_padron_banner_dismissed';
+const ORG_DONE_KEY = 'mrv_org_offline_done';
 
 interface Props {
   isOnline: boolean;
 }
 
-/** Descarga masiva del padrón solo en app nativa; en web la búsqueda va contra la API en línea. */
+type DownloadPhase = 'idle' | 'org' | 'padron';
+
+/** Descarga masiva: primero unidad organizativa, luego padrón (con reanudación). Solo app nativa. */
 export function PadronOfflineBanner({ isOnline }: Props) {
   const native = isNativeApp();
   const { toast } = useToast();
   const [ready, setReady] = useState(false);
+  const [canResumePadron, setCanResumePadron] = useState(false);
   const [dismissed, setDismissed] = useState(() => localStorage.getItem(DISMISS_KEY) === '1');
   const [downloading, setDownloading] = useState(false);
+  const [phase, setPhase] = useState<DownloadPhase>('idle');
   const [progress, setProgress] = useState<PadronDownloadProgress | null>(null);
   const [orgSync, setOrgSync] = useState<OrgSyncResult | null>(null);
   const [networkType, setNetworkType] = useState<string>('unknown');
+  const padronStartedAtRef = useRef<number | null>(null);
+
+  const networkKind: OfflineNetworkKind =
+    networkType === 'wifi' ? 'wifi' : networkType === 'cellular' ? 'cellular' : 'unknown';
+  const orgEstimate = estimateOrgDownload(networkKind);
+  const padronEstimate = estimatePadronDownload(networkKind);
+  const totalEstimate = estimateTotalOfflineDownload(networkKind);
 
   const refresh = useCallback(() => {
     void mrvPadronIndexed.isReady().then(setReady);
+    void mrvPadronIndexed.getMeta().then((m) => {
+      setCanResumePadron(Boolean(m && !m.complete && (m.rowCount > 0 || (m.resumePage ?? 0) > 0)));
+    });
   }, []);
 
   useEffect(() => {
@@ -53,25 +75,38 @@ export function PadronOfflineBanner({ isOnline }: Props) {
 
   if (!native) return null;
 
-  const handleDownload = async () => {
+  const handleDownload = async (resumePadron = false) => {
     if (!isOnline || downloading) return;
     setDownloading(true);
-    setProgress({ imported: 0, total: null, page: 0, bytesApprox: 0, percent: null });
     setOrgSync(null);
+    setProgress({ imported: 0, total: null, page: 0, bytesApprox: 0, percent: null });
+
     try {
-      const res = await mrvPadronIndexed.downloadFromServer((p) => setProgress(p));
+      const orgAlready = localStorage.getItem(ORG_DONE_KEY) === '1';
+      if (!orgAlready) {
+        setPhase('org');
+        const org = await syncOrgStructureOffline();
+        setOrgSync(org);
+        localStorage.setItem(ORG_DONE_KEY, '1');
+      }
+
+      setPhase('padron');
+      padronStartedAtRef.current = Date.now();
+      const res = await mrvPadronIndexed.downloadFromServer(
+        (p) => setProgress(p),
+        { resume: resumePadron || canResumePadron }
+      );
+
       if (res.error) {
         toast({
-          title: 'Descarga incompleta',
-          description: res.error,
+          title: resumePadron || canResumePadron ? 'Descarga pausada' : 'Descarga incompleta',
+          description: `${res.imported.toLocaleString('es-PY')} personas guardadas. Podés continuar cuando vuelva la señal.`,
           variant: 'destructive',
         });
       } else {
-        const org = await syncOrgStructureOffline();
-        setOrgSync(org);
         toast({
           title: 'Datos offline listos',
-          description: `${res.imported.toLocaleString('es-PY')} personas + estructura territorial (región, distrito, servicio y barrio).`,
+          description: `${res.imported.toLocaleString('es-PY')} personas + estructura territorial.`,
         });
       }
       window.dispatchEvent(new Event('mrv-padron-updated'));
@@ -84,6 +119,7 @@ export function PadronOfflineBanner({ isOnline }: Props) {
       });
     } finally {
       setDownloading(false);
+      setPhase('idle');
       setProgress(null);
     }
   };
@@ -115,77 +151,92 @@ export function PadronOfflineBanner({ isOnline }: Props) {
         <div>
           <p className="font-bold">Sin conexión</p>
           <p className="opacity-90 mt-0.5">
-            Si aún no descargaste el padrón con datos, la búsqueda de personas puede estar limitada. Conectate y usá
-            «Descargar padrón nominal».
+            {canResumePadron
+              ? 'Tenés una descarga de padrón a medias: conectate y usá «Continuar descarga».'
+              : 'Conectate y descargá primero la unidad organizativa y luego el padrón nominal.'}
           </p>
         </div>
       </div>
     );
   }
 
+  const phaseLabel =
+    phase === 'org'
+      ? 'Descargando unidad organizativa…'
+      : phase === 'padron'
+        ? 'Descargando padrón nominal…'
+        : null;
+
   return (
     <div className="mx-3 sm:mx-5 mt-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2.5 flex flex-col sm:flex-row sm:items-center gap-2 text-xs text-slate-800">
       <div className="flex-1 min-w-0">
-        <p className="font-bold text-sky-950">Trabajo sin conexión — padrón nominal</p>
+        <p className="font-bold text-sky-950">Trabajo sin conexión</p>
         <p className="mt-0.5 opacity-90">
-          Apenas iniciás sesión, descargá los datos locales para trabajar sin señal: padrón nominal y unidad
-          organizativa (región, distrito, servicio y barrio).
+          Paso 1: unidad organizativa ({orgEstimate.label}). Paso 2: padrón nominal ~831 mil ({padronEstimate.typicalLabel},
+          rango {padronEstimate.rangeLabel}). Total estimado: {totalEstimate}. Si se corta, continuá desde donde quedó.
         </p>
         <p className="mt-1 text-[10px] flex items-center gap-1.5">
           {networkType === 'wifi' ? <Wifi className="w-3.5 h-3.5" /> : <Signal className="w-3.5 h-3.5" />}
           <span>
             {networkType === 'wifi'
-              ? 'Conectado por Wi-Fi: recomendado para esta descarga.'
-              : 'Recomendado por Wi-Fi; igual podés descargar con datos móviles.'}
+              ? 'Wi-Fi: ideal para esta descarga.'
+              : 'Recomendado Wi-Fi; también funciona con datos móviles.'}
           </span>
         </p>
-        {downloading && progress && (
+        {downloading && (
           <div className="mt-2 space-y-1.5" aria-live="polite">
-            <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5 text-[10px] font-semibold text-sky-950">
-              <span>
-                {progress.total != null
-                  ? `${progress.imported.toLocaleString('es-PY')} / ${progress.total.toLocaleString('es-PY')} personas`
-                  : progress.imported > 0
-                    ? `${progress.imported.toLocaleString('es-PY')} personas importadas`
-                    : 'Contando filas en el servidor…'}
-              </span>
-              <span className="font-mono tabular-nums shrink-0">
-                {(
-                  (progress.bytesApprox + (orgSync?.bytesApprox || 0)) /
-                  (1024 * 1024)
-                ).toFixed(2)} MB
-                {progress.percent != null ? ` · ${progress.percent}%` : ''}
-              </span>
-            </div>
-            <progress
-              className="w-full h-2 rounded overflow-hidden accent-[#0055A4]"
-              value={progress.percent != null ? progress.percent : undefined}
-              max={100}
-            />
-            <p className="text-[10px] text-sky-800/90">
-              Lote {progress.page}
-              {progress.total == null && progress.imported > 0
-                ? ' · sin conteo previo: barra indeterminada; confiá en filas y MB.'
-                : ''}
-            </p>
-            {orgSync && (
+            {phaseLabel && <p className="text-[10px] font-bold text-sky-900">{phaseLabel}</p>}
+            {phase === 'padron' && progress && (
+              <>
+                <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5 text-[10px] font-semibold text-sky-950">
+                  <span>
+                    {progress.total != null
+                      ? `${progress.imported.toLocaleString('es-PY')} / ${progress.total.toLocaleString('es-PY')} personas`
+                      : progress.imported > 0
+                        ? `${progress.imported.toLocaleString('es-PY')} personas importadas`
+                        : 'Contando filas en el servidor…'}
+                  </span>
+                  <span className="font-mono tabular-nums shrink-0">
+                    {((progress.bytesApprox + (orgSync?.bytesApprox || 0)) / (1024 * 1024)).toFixed(2)} MB
+                    {progress.percent != null ? ` · ${progress.percent}%` : ''}
+                  </span>
+                </div>
+                <progress
+                  className="w-full h-2 rounded overflow-hidden accent-[#0055A4]"
+                  value={progress.percent != null ? progress.percent : undefined}
+                  max={100}
+                />
+                <p className="text-[10px] text-sky-800/90">
+                  Lote {progress.page}
+                  {padronStartedAtRef.current != null &&
+                    (() => {
+                      const eta = etaRemainingFromProgress(
+                        progress.imported,
+                        progress.total,
+                        padronStartedAtRef.current
+                      );
+                      return eta ? ` · tiempo restante ${eta}` : '';
+                    })()}
+                </p>
+              </>
+            )}
+            {phase === 'org' && orgSync && (
               <p className="text-[10px] text-sky-800/90">
-                Estructura territorial: {orgSync.regiones} regiones, {orgSync.distritos} distritos, {orgSync.barrios}{' '}
-                barrios.
+                {orgSync.regiones} regiones, {orgSync.distritos} distritos, {orgSync.barrios} barrios.
               </p>
             )}
           </div>
         )}
       </div>
-      <div className="flex items-center gap-2 shrink-0">
+      <div className="flex flex-wrap items-center gap-2 shrink-0">
         <button
           type="button"
           disabled={downloading}
-          onClick={() => void handleDownload()}
+          onClick={() => void handleDownload(canResumePadron)}
           className="h-9 px-3 rounded-xl bg-primary text-primary-foreground text-xs font-bold flex items-center gap-1.5 disabled:opacity-50"
         >
           {downloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-          Descargar padrón
+          {canResumePadron ? 'Continuar descarga' : 'Descargar datos offline'}
         </button>
         <button
           type="button"

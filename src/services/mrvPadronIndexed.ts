@@ -20,6 +20,8 @@ export interface PadronMeta {
   updatedAt: number;
   /** true cuando la última descarga terminó sin error de red */
   complete: boolean;
+  /** Página siguiente al reanudar (0 = inicio). */
+  resumePage?: number;
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -130,8 +132,11 @@ export const mrvPadronIndexed = {
     });
   },
 
-  async setMeta(partial: Partial<Omit<PadronMeta, 'key'>> & Pick<PadronMeta, 'rowCount' | 'complete'>): Promise<void> {
+  async setMeta(
+    partial: Partial<Omit<PadronMeta, 'key'>> & Pick<PadronMeta, 'rowCount' | 'complete'>
+  ): Promise<void> {
     const db = await openDB();
+    const prev = await this.getMeta();
     const tx = db.transaction([META_STORE], 'readwrite');
     const store = tx.objectStore(META_STORE);
     const row: PadronMeta = {
@@ -140,6 +145,7 @@ export const mrvPadronIndexed = {
       rowCount: partial.rowCount,
       updatedAt: Date.now(),
       complete: partial.complete,
+      resumePage: partial.resumePage ?? (partial.complete ? undefined : prev?.resumePage),
     };
     await new Promise<void>((resolve, reject) => {
       const r = store.put(row);
@@ -148,10 +154,19 @@ export const mrvPadronIndexed = {
     });
   },
 
-  async downloadFromServer(onProgress?: (p: PadronDownloadProgress) => void): Promise<{ imported: number; error?: string }> {
-    await this.clearAll();
-    let imported = 0;
-    let page = 0;
+  async downloadFromServer(
+    onProgress?: (p: PadronDownloadProgress) => void,
+    opts?: { resume?: boolean }
+  ): Promise<{ imported: number; error?: string; resumed?: boolean }> {
+    const prior = opts?.resume ? await this.getMeta() : null;
+    const canResume = Boolean(prior && !prior.complete && (prior.resumePage ?? 0) > 0);
+    if (canResume && prior) {
+      /* conserva filas ya en IndexedDB */
+    } else {
+      await this.clearAll();
+    }
+    let imported = canResume && prior ? prior.rowCount : 0;
+    let page = canResume && prior ? prior.resumePage ?? 0 : 0;
     let bytesApprox = 0;
     const pageSize = 800;
 
@@ -213,8 +228,8 @@ export const mrvPadronIndexed = {
           data = res.data as Record<string, unknown>[] | null;
         }
         if (fetchError) {
-          await this.setMeta({ rowCount: imported, complete: false });
-          return { imported, error: fetchError };
+          await this.setMeta({ rowCount: imported, complete: false, resumePage: page });
+          return { imported, error: fetchError, resumed: canResume };
         }
         if (!data?.length) break;
         bytesApprox += textEncoder.encode(JSON.stringify(data)).length;
@@ -233,18 +248,19 @@ export const mrvPadronIndexed = {
         }));
         await this.putBatch(batch);
         imported += batch.length;
+        page += 1;
+        await this.setMeta({ rowCount: imported, complete: false, resumePage: page });
         emit();
         if (batch.length < pageSize) break;
-        page += 1;
         if (page > 5000) break;
         await sleep(padronDownloadPageDelayMs());
       }
-      await this.setMeta({ rowCount: imported, complete: true });
-      return { imported };
+      await this.setMeta({ rowCount: imported, complete: true, resumePage: undefined });
+      return { imported, resumed: canResume };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      await this.setMeta({ rowCount: imported, complete: false });
-      return { imported, error: msg };
+      await this.setMeta({ rowCount: imported, complete: false, resumePage: page });
+      return { imported, error: msg, resumed: canResume };
     }
   },
 

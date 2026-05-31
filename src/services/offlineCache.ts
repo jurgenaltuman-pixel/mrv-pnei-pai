@@ -115,65 +115,87 @@ export const offlineCache = {
     });
   },
 
-  async syncAll(): Promise<{ synced: number; failed: number }> {
-    const pending = await this.getPending();
-    if (!pending.length) return { synced: 0, failed: 0 };
+  async syncAll(): Promise<{ synced: number; failed: number; remaining: number }> {
+    let totalSynced = 0;
+    let totalFailed = 0;
+    const maxRounds = 40;
+    const batchSize = 8;
 
-    let synced = 0;
-    let failed = 0;
-    const maxRetries = 5;
-    const batchSize = 5;
+    for (let round = 0; round < maxRounds; round += 1) {
+      const pending = await this.getPending();
+      if (!pending.length) {
+        return { synced: totalSynced, failed: totalFailed, remaining: 0 };
+      }
 
-    for (let i = 0; i < pending.length; i += batchSize) {
-      const batch = pending.slice(i, i + batchSize);
-      const promises = batch.map(async (item) => {
-        try {
-          const registro = toRegistroMRV(item.data);
-          const { ok } = await dataService.guardarRegistro(registro);
-          if (!ok) throw new Error('insert_rejected');
-
-          await this.removePending(item.id);
-          synced++;
-        } catch (error) {
-          const errorMsg = error instanceof Error ? error.message : String(error);
-
-          const attempts = (item.syncAttempts || 0) + 1;
-          if (attempts < maxRetries) {
-            const db = await openDB();
-            const transaction = db.transaction([PENDING_STORE], 'readwrite');
-            const store = transaction.objectStore(PENDING_STORE);
-            await new Promise<void>((resolve, reject) => {
-              const request = store.put({
-                ...item,
-                syncAttempts: attempts,
-                lastError: errorMsg,
+      let roundSynced = 0;
+      for (let i = 0; i < pending.length; i += batchSize) {
+        const batch = pending.slice(i, i + batchSize);
+        await Promise.all(
+          batch.map(async (item) => {
+            try {
+              const registro = toRegistroMRV(item.data);
+              const { ok } = await dataService.guardarRegistro(registro);
+              if (!ok) throw new Error('insert_rejected');
+              await this.removePending(item.id);
+              roundSynced += 1;
+            } catch (error) {
+              const errorMsg = error instanceof Error ? error.message : String(error);
+              const isValidation =
+                errorMsg.includes('validar') ||
+                errorMsg.includes('Zod') ||
+                errorMsg.includes('Required');
+              if (isValidation) {
+                await this.removePending(item.id);
+                totalFailed += 1;
+                return;
+              }
+              const attempts = (item.syncAttempts || 0) + 1;
+              const db = await openDB();
+              const transaction = db.transaction([PENDING_STORE], 'readwrite');
+              const store = transaction.objectStore(PENDING_STORE);
+              await new Promise<void>((resolve, reject) => {
+                const request = store.put({
+                  ...item,
+                  syncAttempts: attempts,
+                  lastError: errorMsg,
+                });
+                request.onsuccess = () => resolve();
+                request.onerror = () => reject(request.error);
               });
-              request.onsuccess = () => resolve();
-              request.onerror = () => reject(request.error);
-            });
-          } else {
-            await this.removePending(item.id);
-          }
-          failed++;
-        }
-      });
-      await Promise.allSettled(promises);
-      await new Promise((resolve) => setTimeout(resolve, 120));
+            }
+          })
+        );
+        await new Promise((resolve) => setTimeout(resolve, 80));
+      }
+
+      totalSynced += roundSynced;
+      if (roundSynced === 0) break;
     }
 
-    return { synced, failed };
+    const remaining = await this.getPendingCount();
+    return { synced: totalSynced, failed: totalFailed, remaining };
   },
 };
 
 if (typeof window !== 'undefined') {
-  window.addEventListener('online', async () => {
-    const count = await offlineCache.getPendingCount();
-    if (count > 0) {
-      offlineCache.syncAll().then(({ synced }) => {
-        if (synced > 0) {
-          console.log(`Synced ${synced} pending records`);
-        }
+  const runSync = () => {
+    void offlineCache.syncAll().then(({ synced, remaining }) => {
+      if (synced > 0) console.log(`[offline] ${synced} registros sincronizados`);
+      if (remaining > 0) {
+        window.setTimeout(runSync, 4000);
+      }
+    });
+  };
+  window.addEventListener('online', () => {
+    void offlineCache.getPendingCount().then((count) => {
+      if (count > 0) runSync();
+    });
+  });
+  window.setInterval(() => {
+    if (typeof navigator !== 'undefined' && navigator.onLine) {
+      void offlineCache.getPendingCount().then((count) => {
+        if (count > 0) runSync();
       });
     }
-  });
+  }, 25_000);
 }
