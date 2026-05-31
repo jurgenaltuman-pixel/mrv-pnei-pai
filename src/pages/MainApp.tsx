@@ -8,6 +8,7 @@ import { useOrgStructure } from '@/hooks/useOrgStructure';
 import { useDataRefresh } from '@/contexts/DataRefreshContext';
 import { offlineCache } from '@/services/offlineCache';
 import { resolveDriveLinksInPayload } from '@/services/driveAdjuntosOfflineQueue';
+import { getOfflineSyncStatus, refreshPendingCounts, syncAllOfflineData } from '@/services/mrvOfflineSync';
 import HeaderSection from '@/components/mrv/HeaderSection';
 import ChildDataSection from '@/components/mrv/ChildDataSection';
 import BottomNav from '@/components/mrv/BottomNav';
@@ -41,6 +42,7 @@ import {
 } from '@/lib/visit-session-storage';
 import { CampaignAppHeader } from '@/components/branding/CampaignAppHeader';
 import { PadronOfflineBanner } from '@/components/mrv/PadronOfflineBanner';
+import { OfflineSyncBar } from '@/components/mrv/OfflineSyncBar';
 import FridayReminderBanner from '@/components/mrv/FridayReminderBanner';
 import { useFridayReminder } from '@/hooks/useFridayReminder';
 import ProfileScopeEditor from '@/components/mrv/ProfileScopeEditor';
@@ -137,6 +139,8 @@ export default function MainApp() {
   const { regiones, distritos, servicios, getBarriosByDistrito } = useOrgStructure();
   const [tab, setTab] = useState('registro');
   const [pendingCount, setPendingCount] = useState(0);
+  const [pendingDriveCount, setPendingDriveCount] = useState(0);
+  const [syncingOffline, setSyncingOffline] = useState(false);
   const [resumeRoundId, setResumeRoundId] = useState<string | null>(null);
   const [roundsDockKey, setRoundsDockKey] = useState(0);
   const [activeRoundId, setActiveRoundId] = useState<string | null>(null);
@@ -148,9 +152,48 @@ export default function MainApp() {
     return () => clearTimeout(t);
   }, [resumeRoundId]);
 
-  useEffect(() => {
-    void offlineCache.getPendingCount().then(setPendingCount);
+  const refreshPending = useCallback(async () => {
+    const c = await refreshPendingCounts();
+    setPendingCount(c.registros);
+    setPendingDriveCount(c.drive);
   }, []);
+
+  useEffect(() => {
+    void refreshPending();
+  }, [refreshPending]);
+
+  const runSyncAll = useCallback(
+    async (silent = false) => {
+      setSyncingOffline(true);
+      try {
+        const r = await syncAllOfflineData(isOnline);
+        if (!silent || r.registrosSynced > 0 || r.driveUploaded > 0 || !r.allSynced) {
+          toast({
+            title: r.allSynced ? 'Todo sincronizado' : r.ok ? 'Sincronización' : 'Sin conexión',
+            description: r.message,
+            variant: r.allSynced ? 'default' : !r.ok ? 'destructive' : 'default',
+          });
+        }
+        await refreshPending();
+        if (r.registrosSynced > 0) triggerRefresh();
+        return r;
+      } finally {
+        setSyncingOffline(false);
+      }
+    },
+    [isOnline, toast, refreshPending, triggerRefresh]
+  );
+
+  const wasOfflineRef = useRef(true);
+  useEffect(() => {
+    if (isOnline && wasOfflineRef.current) {
+      void (async () => {
+        const s = await getOfflineSyncStatus();
+        if (s.totalPending > 0) await runSyncAll(true);
+      })();
+    }
+    wasOfflineRef.current = !isOnline;
+  }, [isOnline, runSyncAll]);
 
   const [regionId, setRegionId] = useState<number | null>(null);
   const [distritoId, setDistritoId] = useState<number | null>(null);
@@ -573,17 +616,6 @@ export default function MainApp() {
         dosisSpr ? `SPR: ${dosisSpr}` : null,
         fechaSpr ? `Fecha: ${fechaSpr}` : null,
       ].filter(Boolean).join(' | ') || null;  // Datos de dosis para "vacunado"
-
-  useEffect(() => {
-    if (isOnline && pendingCount > 0) {
-      offlineCache.syncAll().then(({ synced }) => {
-        if (synced > 0) {
-          toast({ title: `${synced} registros sincronizados`, description: 'Datos pendientes enviados al servidor' });
-        }
-        void offlineCache.getPendingCount().then(setPendingCount);
-      });
-    }
-  }, [isOnline]);
 
   useEffect(() => {
     let active = true;
@@ -1048,7 +1080,7 @@ export default function MainApp() {
         if (sinRed) {
           try {
             await offlineCache.savePending(payloadRecord);
-            void offlineCache.getPendingCount().then(setPendingCount);
+            void refreshPending();
             guardadoOk = true;
             toast({
               title: 'Guardado en el teléfono',
@@ -1075,7 +1107,7 @@ export default function MainApp() {
     } else {
       try {
         await offlineCache.savePending(payloadRecord);
-        void offlineCache.getPendingCount().then(setPendingCount);
+        void refreshPending();
         guardadoOk = true;
         toast({
           title: 'Guardado sin conexión',
@@ -1130,6 +1162,9 @@ export default function MainApp() {
         user={user}
         isOnline={isOnline}
         pendingCount={pendingCount}
+        pendingDriveCount={pendingDriveCount}
+        syncing={syncingOffline}
+        onSyncAll={() => void runSyncAll()}
         onLogout={logout}
         asignacion={
           perfilAsignacion
@@ -1141,6 +1176,15 @@ export default function MainApp() {
             : undefined
         }
         pwaInstall={canInstall ? { canInstall: true, onInstall: install } : undefined}
+      />
+      <OfflineSyncBar
+        isOnline={isOnline}
+        syncing={syncingOffline}
+        onSync={() => runSyncAll()}
+        onStatusChange={(s) => {
+          setPendingCount(s.pendingRegistros);
+          setPendingDriveCount(s.pendingDriveImages);
+        }}
       />
       <PadronOfflineBanner isOnline={isOnline} />
       {fridayReminder.visible && fridayReminder.alertas && (
@@ -1216,7 +1260,7 @@ export default function MainApp() {
                 onPrepareEditNino={iniciarEdicionNinoCasa}
                 onCancelEditNino={cancelarEdicionNinoCasa}
                 editingNinoId={ninoEnEdicion?.id ?? null}
-                onPendingSync={() => void offlineCache.getPendingCount().then(setPendingCount)}
+                onPendingSync={() => void refreshPending()}
                 renderUbicacion={() => (
                   <HeaderSection
                     geo={geo}

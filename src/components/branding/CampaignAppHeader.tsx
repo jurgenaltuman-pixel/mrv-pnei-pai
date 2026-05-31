@@ -1,4 +1,4 @@
-import { Building2, Download, LogOut, MapPinned, RefreshCw, Stethoscope, User, WifiOff } from 'lucide-react';
+import { Building2, CloudUpload, Download, LogOut, MapPinned, RefreshCw, Stethoscope, User, WifiOff } from 'lucide-react';
 import { APP_TITLE_PRIMARY } from '@/lib/app-branding';
 import { APP_BUILD_ID, forceAppUpdate } from '@/lib/force-app-update';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -7,6 +7,9 @@ export interface CampaignAppHeaderProps {
   user: { nombre: string; email: string } | null;
   isOnline: boolean;
   pendingCount: number;
+  pendingDriveCount?: number;
+  syncing?: boolean;
+  onSyncAll?: () => void;
   onLogout: () => void;
   /** Asignación territorial del brigadista (perfil). */
   asignacion?: {
@@ -50,6 +53,9 @@ export function CampaignAppHeader({
   user,
   isOnline,
   pendingCount,
+  pendingDriveCount = 0,
+  syncing = false,
+  onSyncAll,
   onLogout,
   asignacion,
   pwaInstall,
@@ -101,13 +107,25 @@ export function CampaignAppHeader({
 
           <div className="flex flex-col items-end gap-1 shrink-0 row-span-2 sm:row-span-1 self-center">
             <div className="flex flex-wrap justify-end gap-1">
-              {pendingCount > 0 && (
+              {(pendingCount > 0 || pendingDriveCount > 0) && (
                 <span
                   className="inline-flex rounded-lg bg-amber-100 text-amber-950 px-1.5 py-0.5 text-[10px] font-bold border border-amber-200/80"
-                  title="Pendientes de sincronizar"
+                  title={`${pendingCount} registro(s)${pendingDriveCount ? ` · ${pendingDriveCount} foto(s)` : ''} pendientes`}
                 >
-                  {pendingCount}
+                  {pendingCount + pendingDriveCount}
                 </span>
+              )}
+              {onSyncAll && (pendingCount > 0 || pendingDriveCount > 0) && (
+                <button
+                  type="button"
+                  disabled={syncing || !isOnline}
+                  onClick={onSyncAll}
+                  className="p-2.5 max-lg:p-3 rounded-xl text-white bg-[#0055A4] hover:bg-[#003d7a] border border-sky-900/20 active:scale-[0.98] disabled:opacity-50"
+                  title="Sincronizar registros y fotos pendientes"
+                  aria-label="Sincronizar todo"
+                >
+                  <CloudUpload className={`w-4 h-4 max-lg:w-[1.15rem] max-lg:h-[1.15rem] ${syncing ? 'animate-pulse' : ''}`} />
+                </button>
               )}
               {!isOnline && (
                 <span className="inline-flex items-center gap-0.5 rounded-lg bg-amber-100 text-amber-950 px-1.5 py-0.5 text-[10px] font-semibold border border-amber-200/80">

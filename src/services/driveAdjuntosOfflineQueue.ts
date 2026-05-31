@@ -139,11 +139,37 @@ export async function flushPendingDriveForClip(
 }
 
 export async function getPendingDriveCount(): Promise<number> {
+  const all = await getAllPendingDrive();
+  return all.length;
+}
+
+export async function getAllPendingDrive(): Promise<PendingDriveAdjunto[]> {
   const db = await openDriveDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction([PENDING_DRIVE_STORE], 'readonly');
-    const req = tx.objectStore(PENDING_DRIVE_STORE).count();
-    req.onsuccess = () => resolve(req.result);
+    const req = tx.objectStore(PENDING_DRIVE_STORE).getAll();
+    req.onsuccess = () => resolve(req.result ?? []);
     req.onerror = () => reject(req.error);
   });
+}
+
+/** Sube todas las fotos en cola (aunque aún no tengan registro en servidor). */
+export async function syncAllPendingDriveImages(): Promise<{
+  uploaded: number;
+  failed: number;
+  remaining: number;
+}> {
+  const items = await getAllPendingDrive();
+  let uploaded = 0;
+  let failed = 0;
+  for (const item of items) {
+    try {
+      await uploadQueuedDriveItem(item.id);
+      uploaded += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+  const remaining = await getPendingDriveCount();
+  return { uploaded, failed, remaining };
 }
