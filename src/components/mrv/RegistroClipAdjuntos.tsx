@@ -1,8 +1,11 @@
-import { useRef, useState } from 'react';
-import { ImagePlus, Upload, ExternalLink, Loader2, Mic, User } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { ImagePlus, Upload, ExternalLink, Loader2, CloudOff, Cloud } from 'lucide-react';
 import { resizeImageFileForUpload } from '@/lib/resize-image-for-upload';
 import { uploadPersonSearchImages } from '@/services/personSearchAttachmentsApi';
 import type { ClipNinoMeta, RegistroClipAdjuntos } from '@/lib/registro-clip-adjuntos';
+import { clipStorageKey } from '@/lib/registro-clip-adjuntos';
+import { isPendingDriveUrl, pendingDriveUrl } from '@/lib/pending-drive-url';
+import { flushPendingDriveForClip, queueDriveImage } from '@/services/driveAdjuntosOfflineQueue';
 import { useToast } from '@/hooks/use-toast';
 
 const MAX_IMAGES = 2;
@@ -11,12 +14,13 @@ interface Props {
   meta: ClipNinoMeta;
   adjuntos: RegistroClipAdjuntos;
   onAdjuntosChange: (a: RegistroClipAdjuntos) => void;
-  /** Varios resultados: elegir otro niño de la misma búsqueda */
   alternativas?: ClipNinoMeta[];
   onElegirAlternativa?: (m: ClipNinoMeta) => void;
   sinHistorialSpr?: boolean;
-  /** Campo opcional independiente del formulario (no obligatorio). */
   opcional?: boolean;
+  /** Solo fotos (sin transcripción). */
+  soloFotos?: boolean;
+  isOnline?: boolean;
 }
 
 export default function RegistroClipAdjuntosSection({
@@ -27,14 +31,18 @@ export default function RegistroClipAdjuntosSection({
   onElegirAlternativa,
   sinHistorialSpr,
   opcional = true,
+  soloFotos = false,
+  isOnline = true,
 }: Props) {
   const { toast } = useToast();
   const [files, setFiles] = useState<(File | null)[]>([null, null]);
   const [uploading, setUploading] = useState(false);
+  const [flushing, setFlushing] = useState(false);
   const fileRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   const docRef = meta.documento.trim();
   const nombreRef = meta.nombre.trim();
+  const clipKey = clipStorageKey(meta.tipo, docRef);
   const puedeSubir = docRef.length >= 4 && nombreRef.length >= 2;
 
   const pickFile = (index: number, file: File | undefined) => {
@@ -46,11 +54,24 @@ export default function RegistroClipAdjuntosSection({
     });
   };
 
+  const subirOnline = async (
+    images: { filename: string; mimeType: string; dataBase64: string }[]
+  ) => {
+    const { urls, error } = await uploadPersonSearchImages({
+      documento: docRef,
+      tipoDocumento: meta.tipo,
+      nombre: nombreRef,
+      images,
+    });
+    if (error) throw new Error(error);
+    return urls;
+  };
+
   const subir = async () => {
     if (!puedeSubir) {
       toast({
         title: 'Datos del niño/a',
-        description: 'Seleccioná un resultado o completá nombre y documento antes de subir.',
+        description: 'Completá nombre (mín. 2 letras) y documento (mín. 4 caracteres) antes de subir.',
         variant: 'destructive',
       });
       return;
@@ -64,28 +85,48 @@ export default function RegistroClipAdjuntosSection({
     setUploading(true);
     try {
       const images = await Promise.all(selected.map((f) => resizeImageFileForUpload(f)));
-      const { urls, error } = await uploadPersonSearchImages({
-        documento: docRef,
-        tipoDocumento: meta.tipo,
-        nombre: nombreRef,
-        images,
-      });
-      if (error) {
-        toast({ title: 'Error al subir', description: error, variant: 'destructive' });
-        return;
+      let enlace1 = adjuntos.enlace_imagen_1;
+      let enlace2 = adjuntos.enlace_imagen_2;
+
+      if (isOnline) {
+        const urls = await subirOnline(images);
+        if (urls[0]) enlace1 = urls[0];
+        if (urls[1]) enlace2 = urls[1] || enlace2;
+        toast({
+          title: 'Guardado en Drive',
+          description: `Imágenes asociadas a ${meta.tipo} ${docRef}.`,
+        });
+      } else {
+        const slots: ('enlace_imagen_1' | 'enlace_imagen_2')[] = ['enlace_imagen_1', 'enlace_imagen_2'];
+        let slotIdx = 0;
+        if (enlace1 && !isPendingDriveUrl(enlace1)) slotIdx = 1;
+        for (let i = 0; i < images.length && slotIdx < slots.length; i += 1) {
+          if (slots[slotIdx] === 'enlace_imagen_2' && enlace2 && !isPendingDriveUrl(enlace2)) break;
+          const id = await queueDriveImage({
+            clipKey,
+            documento: docRef,
+            tipoDocumento: meta.tipo,
+            nombre: nombreRef,
+            image: images[i],
+          });
+          if (slots[slotIdx] === 'enlace_imagen_1') enlace1 = pendingDriveUrl(id);
+          else enlace2 = pendingDriveUrl(id);
+          slotIdx += 1;
+        }
+        toast({
+          title: 'Guardado en el dispositivo',
+          description: 'Sin conexión: las fotos se subirán a Drive al reconectar.',
+        });
       }
+
       onAdjuntosChange({
         ...adjuntos,
-        enlace_imagen_1: urls[0] || adjuntos.enlace_imagen_1,
-        enlace_imagen_2: urls[1] || adjuntos.enlace_imagen_2,
+        enlace_imagen_1: enlace1,
+        enlace_imagen_2: enlace2,
       });
       setFiles([null, null]);
       fileRefs.current.forEach((el) => {
         if (el) el.value = '';
-      });
-      toast({
-        title: 'Guardado en Drive',
-        description: `Enlaces asociados a ${meta.tipo} ${docRef}. Se guardan con el registro de la visita.`,
       });
     } catch (e) {
       toast({
@@ -98,18 +139,67 @@ export default function RegistroClipAdjuntosSection({
     }
   };
 
+  useEffect(() => {
+    if (!isOnline || !puedeSubir) return;
+    const hasPending =
+      isPendingDriveUrl(adjuntos.enlace_imagen_1) || isPendingDriveUrl(adjuntos.enlace_imagen_2);
+    if (!hasPending) return;
+
+    let cancelled = false;
+    setFlushing(true);
+    void flushPendingDriveForClip(clipKey, adjuntos)
+      .then((resolved) => {
+        if (cancelled) return;
+        if (
+          resolved.enlace_imagen_1 !== adjuntos.enlace_imagen_1 ||
+          resolved.enlace_imagen_2 !== adjuntos.enlace_imagen_2
+        ) {
+          onAdjuntosChange({ ...adjuntos, ...resolved });
+          toast({
+            title: 'Fotos subidas a Drive',
+            description: 'Se sincronizaron las imágenes guardadas sin conexión.',
+          });
+        }
+      })
+      .catch(() => {
+        /* reintenta al próximo online */
+      })
+      .finally(() => {
+        if (!cancelled) setFlushing(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOnline, clipKey, puedeSubir]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const activoKey = `${meta.tipo}:${meta.documento}`;
+  const pendingCount = [adjuntos.enlace_imagen_1, adjuntos.enlace_imagen_2].filter((u) =>
+    isPendingDriveUrl(u)
+  ).length;
 
   return (
-    <div className="rounded-lg border border-amber-300/60 bg-amber-50/80 dark:bg-amber-950/20 p-2.5 space-y-2">
-      <p className="text-[11px] font-bold text-amber-900 dark:text-amber-100 flex items-center gap-1">
-        <Mic className="w-3.5 h-3.5 shrink-0" />
-        {opcional ? 'Adjuntos opcionales' : 'Clip de esta búsqueda'}
-        <span className="font-normal text-[10px] opacity-80">
-          {opcional ? ' (transcripción / fotos)' : ''}
-          {sinHistorialSpr ? ' · sin historial SPR' : ''}
-        </span>
-      </p>
+    <div className="rounded-lg border-2 border-[#0055A4]/25 bg-[#0055A4]/5 p-3 space-y-2.5">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-sm font-bold text-[#0055A4] flex items-center gap-1.5">
+          <ImagePlus className="w-4 h-4 shrink-0" />
+          Subir imágenes a Drive
+          <span className="font-normal text-[11px] text-muted-foreground">(opcional · máx. {MAX_IMAGES})</span>
+        </p>
+        {!isOnline ? (
+          <span className="text-[10px] font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full inline-flex items-center gap-1 shrink-0">
+            <CloudOff className="w-3 h-3" /> Offline
+          </span>
+        ) : flushing ? (
+          <span className="text-[10px] text-muted-foreground inline-flex items-center gap-1">
+            <Loader2 className="w-3 h-3 animate-spin" /> Sincronizando…
+          </span>
+        ) : (
+          <span className="text-[10px] text-emerald-700 inline-flex items-center gap-1 shrink-0">
+            <Cloud className="w-3 h-3" /> Online
+          </span>
+        )}
+      </div>
 
       {alternativas && alternativas.length > 1 && onElegirAlternativa && (
         <div className="flex flex-wrap gap-1">
@@ -137,33 +227,31 @@ export default function RegistroClipAdjuntosSection({
         </div>
       )}
 
-      <p className="text-[10px] text-foreground/90 flex items-start gap-1">
-        <User className="w-3 h-3 shrink-0 mt-0.5" />
-        <span>
-          <span className="font-semibold">{nombreRef || '(sin nombre)'}</span>
-          {' · '}
-          <span className="font-mono">
-            {meta.tipo} {docRef}
-          </span>
-        </span>
+      <p className="text-[11px] text-foreground/90">
+        <span className="font-semibold">{nombreRef || '(completá el nombre)'}</span>
+        {' · '}
+        <span className="font-mono">{meta.tipo} {docRef || '…'}</span>
       </p>
 
-      <textarea
-        value={adjuntos.transcripcion_clip || ''}
-        onChange={(e) =>
-          onAdjuntosChange({ ...adjuntos, transcripcion_clip: e.target.value.slice(0, 2000) })
-        }
-        rows={2}
-        className="w-full text-xs rounded-md border bg-background px-2 py-1.5 resize-y min-h-[2.5rem]"
-        placeholder="Transcripción, nota de la búsqueda o contexto…"
-      />
-      <div className="grid grid-cols-2 gap-1.5">
+      {!soloFotos && (
+        <textarea
+          value={adjuntos.transcripcion_clip || ''}
+          onChange={(e) =>
+            onAdjuntosChange({ ...adjuntos, transcripcion_clip: e.target.value.slice(0, 2000) })
+          }
+          rows={2}
+          className="w-full text-xs rounded-md border bg-background px-2 py-1.5 resize-y min-h-[2.5rem]"
+          placeholder="Transcripción o nota (opcional)…"
+        />
+      )}
+
+      <div className="grid grid-cols-2 gap-2">
         {[0, 1].map((i) => (
           <label
             key={i}
-            className="flex flex-col gap-0.5 cursor-pointer rounded border bg-background p-1.5 text-[10px]"
+            className="flex flex-col gap-1 cursor-pointer rounded-lg border bg-background p-2 text-[11px]"
           >
-            <span className="font-medium text-muted-foreground">Foto {i + 1}</span>
+            <span className="font-semibold text-muted-foreground">Imagen {i + 1}</span>
             <input
               ref={(el) => {
                 fileRefs.current[i] = el;
@@ -178,48 +266,59 @@ export default function RegistroClipAdjuntosSection({
           </label>
         ))}
       </div>
+
       <button
         type="button"
-        disabled={uploading || !puedeSubir}
+        disabled={uploading || flushing || !puedeSubir}
         onClick={() => void subir()}
-        className="h-8 w-full rounded-md bg-[#0055A4] text-white text-[11px] font-bold flex items-center justify-center gap-1 disabled:opacity-50"
+        className="h-10 w-full rounded-lg bg-[#0055A4] text-white text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50"
       >
-        {uploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
-        Subir fotos a Drive (máx. {MAX_IMAGES})
+        {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+        {isOnline ? 'Subir imágenes a Drive' : 'Guardar imágenes (subir al reconectar)'}
       </button>
-      {(adjuntos.enlace_imagen_1 || adjuntos.enlace_imagen_2) && (
-        <ul className="text-[10px] space-y-0.5 break-all">
+
+      {(adjuntos.enlace_imagen_1 || adjuntos.enlace_imagen_2 || pendingCount > 0) && (
+        <ul className="text-[11px] space-y-1 break-all">
           {adjuntos.enlace_imagen_1 && (
             <li>
-              <a
-                href={adjuntos.enlace_imagen_1}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary underline inline-flex items-center gap-0.5"
-              >
-                Imagen 1 <ExternalLink className="w-2.5 h-2.5" />
-              </a>
+              {isPendingDriveUrl(adjuntos.enlace_imagen_1) ? (
+                <span className="text-amber-800 font-medium">Imagen 1 · pendiente de Drive (offline)</span>
+              ) : (
+                <a
+                  href={adjuntos.enlace_imagen_1}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary underline inline-flex items-center gap-0.5"
+                >
+                  Imagen 1 en Drive <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
             </li>
           )}
           {adjuntos.enlace_imagen_2 && (
             <li>
-              <a
-                href={adjuntos.enlace_imagen_2}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary underline inline-flex items-center gap-0.5"
-              >
-                Imagen 2 <ExternalLink className="w-2.5 h-2.5" />
-              </a>
+              {isPendingDriveUrl(adjuntos.enlace_imagen_2) ? (
+                <span className="text-amber-800 font-medium">Imagen 2 · pendiente de Drive (offline)</span>
+              ) : (
+                <a
+                  href={adjuntos.enlace_imagen_2}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary underline inline-flex items-center gap-0.5"
+                >
+                  Imagen 2 en Drive <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
             </li>
           )}
         </ul>
       )}
-      <p className="text-[9px] text-muted-foreground flex items-start gap-1">
-        <ImagePlus className="w-3 h-3 shrink-0" />
+
+      <p className="text-[10px] text-muted-foreground">
         {opcional
-          ? 'No es obligatorio. Si completás datos, se guardan con el registro y en el Excel del dashboard.'
-          : 'Cada niño de la búsqueda tiene su propio clip. Al guardar la visita, va al registro y al Excel del dashboard.'}
+          ? 'Opcional. Las fotos se guardan con el registro de la visita. Funciona sin internet: se encolan y suben solas al volver la conexión.'
+          : 'Las imágenes van al registro y al Excel del dashboard.'}
+        {sinHistorialSpr ? ' · Sin historial SPR en padrón.' : ''}
       </p>
     </div>
   );

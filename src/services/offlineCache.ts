@@ -2,9 +2,12 @@ import { dataService } from '@/services/dataService';
 import { PendingRegistroPayloadSchema, validarOLanzar } from '@/lib/validation-schemas';
 import type { RegistroMRV } from '@/services/dataService';
 
+import { resolveDriveLinksInPayload } from '@/services/driveAdjuntosOfflineQueue';
+
 const DB_NAME = 'mrv_offline';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const PENDING_STORE = 'pending_registros';
+const PENDING_DRIVE_STORE = 'pending_drive_adjuntos';
 
 export interface PendingRegistro {
   id: string;
@@ -31,6 +34,9 @@ function openDB(): Promise<IDBDatabase> {
         const db = (event.target as IDBOpenDBRequest).result;
         if (!db.objectStoreNames.contains(PENDING_STORE)) {
           db.createObjectStore(PENDING_STORE, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(PENDING_DRIVE_STORE)) {
+          db.createObjectStore(PENDING_DRIVE_STORE, { keyPath: 'id' });
         }
       };
     });
@@ -66,6 +72,9 @@ function toRegistroMRV(raw: Record<string, unknown>): Omit<RegistroMRV, 'id' | '
     dosis_spr: (v as { dosis_spr?: string }).dosis_spr ?? null,
     estado_intervencion: (v as { estado_intervencion?: string }).estado_intervencion ?? null,
     tiene_cvs: (v as { tiene_cvs?: boolean }).tiene_cvs ?? null,
+    transcripcion_clip: (v as { transcripcion_clip?: string }).transcripcion_clip ?? null,
+    enlace_imagen_1: (v as { enlace_imagen_1?: string }).enlace_imagen_1 ?? null,
+    enlace_imagen_2: (v as { enlace_imagen_2?: string }).enlace_imagen_2 ?? null,
   };
 }
 
@@ -133,7 +142,8 @@ export const offlineCache = {
         await Promise.all(
           batch.map(async (item) => {
             try {
-              const registro = toRegistroMRV(item.data);
+              const resolved = await resolveDriveLinksInPayload(item.data);
+              const registro = toRegistroMRV(resolved);
               const { ok } = await dataService.guardarRegistro(registro);
               if (!ok) throw new Error('insert_rejected');
               await this.removePending(item.id);

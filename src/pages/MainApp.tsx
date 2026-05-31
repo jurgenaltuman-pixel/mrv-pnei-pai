@@ -7,6 +7,7 @@ import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { useOrgStructure } from '@/hooks/useOrgStructure';
 import { useDataRefresh } from '@/contexts/DataRefreshContext';
 import { offlineCache } from '@/services/offlineCache';
+import { resolveDriveLinksInPayload } from '@/services/driveAdjuntosOfflineQueue';
 import HeaderSection from '@/components/mrv/HeaderSection';
 import ChildDataSection from '@/components/mrv/ChildDataSection';
 import BottomNav from '@/components/mrv/BottomNav';
@@ -1006,7 +1007,25 @@ export default function MainApp() {
     let guardadoOk = false;
 
     if (isOnline) {
-      const { ok, error: saveError } = await dataService.guardarRegistro(registroData);
+      let dataToSave = registroData;
+      try {
+        dataToSave = (await resolveDriveLinksInPayload(
+          registroData as Record<string, unknown>
+        )) as typeof registroData;
+        if (
+          dataToSave.enlace_imagen_1 !== registroData.enlace_imagen_1 ||
+          dataToSave.enlace_imagen_2 !== registroData.enlace_imagen_2
+        ) {
+          setClipAdjuntos({
+            transcripcion_clip: dataToSave.transcripcion_clip ?? undefined,
+            enlace_imagen_1: dataToSave.enlace_imagen_1 ?? undefined,
+            enlace_imagen_2: dataToSave.enlace_imagen_2 ?? undefined,
+          });
+        }
+      } catch (e) {
+        console.warn('Drive adjuntos pendientes:', e);
+      }
+      const { ok, error: saveError } = await dataService.guardarRegistro(dataToSave);
       setSaving(false);
       if (ok) {
         guardadoOk = true;
@@ -1252,6 +1271,7 @@ export default function MainApp() {
                     distrito={distritoNombre}
                     servicioSalud={servicioNombre}
                     onClipAdjuntosChange={setClipAdjuntos}
+                    isOnline={isOnline}
                   />
                 )}
                 renderVerificacion={() => (

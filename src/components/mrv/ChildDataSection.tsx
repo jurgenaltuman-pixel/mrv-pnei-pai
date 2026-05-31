@@ -61,6 +61,7 @@ interface Props {
   distrito?: string;
   servicioSalud?: string;
   onClipAdjuntosChange: (a: RegistroClipAdjuntos) => void;
+  isOnline?: boolean;
 }
 
 type SearchMode = 'documento' | 'personales';
@@ -92,7 +93,8 @@ export default function ChildDataSection(props: Props) {
   const [clipPorNino, setClipPorNino] = useState<Record<string, RegistroClipAdjuntos>>({});
   const [clipActivoMeta, setClipActivoMeta] = useState<ClipNinoMeta | null>(null);
   const [padronSearchStatus, setPadronSearchStatus] = useState<PadronSearchStatus>({ kind: 'idle' });
-  const [clipOpcionalAbierto, setClipOpcionalAbierto] = useState(true);
+
+  const tipoDocActual = props.sinDocumento ? 'DEX' : tipoDoc;
 
   const activarClipNino = useCallback(
     (meta: ClipNinoMeta) => {
@@ -212,10 +214,10 @@ export default function ChildDataSection(props: Props) {
 
   useEffect(() => {
     if (props.visitaSinDatosNino || documentoClip.length < 4) return;
-    const key = clipStorageKey(tipoDoc, documentoClip);
+    const key = clipStorageKey(tipoDocActual, documentoClip);
     if (clipActivoMeta && clipStorageKey(clipActivoMeta.tipo, clipActivoMeta.documento) === key) return;
-    activarClipNino({ tipo: tipoDoc, documento: documentoClip, nombre: props.nombre.trim() });
-  }, [documentoClip, props.visitaSinDatosNino, props.nombre, tipoDoc, clipActivoMeta, activarClipNino]);
+    activarClipNino({ tipo: tipoDocActual, documento: documentoClip, nombre: props.nombre.trim() });
+  }, [documentoClip, props.visitaSinDatosNino, props.nombre, tipoDocActual, clipActivoMeta, activarClipNino]);
 
   const clipSinHistorialSpr = useMemo(() => {
     if (historialLoading) return false;
@@ -435,41 +437,33 @@ export default function ChildDataSection(props: Props) {
           : 'bg-muted/50 border-border text-muted-foreground';
 
   const panelClipOpcional =
-    !props.visitaSinDatosNino && clipActivoMeta && documentoClip.length >= 4 ? (
-      <details
-        className="rounded-lg border-2 border-[#0055A4]/30 bg-[#0055A4]/5"
-        open={clipOpcionalAbierto}
-        onToggle={(e) => setClipOpcionalAbierto((e.target as HTMLDetailsElement).open)}
-      >
-        <summary className="cursor-pointer px-3 py-2.5 text-sm font-bold text-[#0055A4] list-none flex items-center justify-between gap-2">
-          <span className="flex items-center gap-2">
-            Subir transcripción y fotos (Drive)
-          </span>
-          <span className="text-[10px] font-normal text-muted-foreground">Opcional · tocá para abrir/cerrar</span>
-        </summary>
-        <div className="px-2 pb-2">
-          <RegistroClipAdjuntosSection
-            meta={{
-              ...clipActivoMeta,
-              nombre: clipActivoMeta.nombre || props.nombre.trim(),
-            }}
-            adjuntos={clipActivoAdjuntos}
-            onAdjuntosChange={actualizarClipActivo}
-            alternativas={alternativasClip.length > 1 ? alternativasClip : undefined}
-            onElegirAlternativa={(m) => {
-              const p = sugerencias.find(
-                (s) =>
-                  clipStorageKey(s.tipo_documento || tipoDoc, s.documento) ===
-                  clipStorageKey(m.tipo, m.documento)
-              );
-              if (p) seleccionar(p);
-              else activarClipNino(m);
-            }}
-            sinHistorialSpr={clipSinHistorialSpr}
-            opcional
-          />
-        </div>
-      </details>
+    !props.visitaSinDatosNino &&
+    clipActivoMeta &&
+    props.documento.trim().length >= 4 &&
+    props.nombre.trim().length >= 2 ? (
+      <RegistroClipAdjuntosSection
+        meta={{
+          ...clipActivoMeta,
+          tipo: tipoDocActual,
+          nombre: clipActivoMeta.nombre || props.nombre.trim(),
+        }}
+        adjuntos={clipActivoAdjuntos}
+        onAdjuntosChange={actualizarClipActivo}
+        alternativas={alternativasClip.length > 1 ? alternativasClip : undefined}
+        onElegirAlternativa={(m) => {
+          const p = sugerencias.find(
+            (s) =>
+              clipStorageKey(s.tipo_documento || tipoDoc, s.documento) ===
+              clipStorageKey(m.tipo, m.documento)
+          );
+          if (p) seleccionar(p);
+          else activarClipNino(m);
+        }}
+        sinHistorialSpr={clipSinHistorialSpr}
+        opcional
+        soloFotos
+        isOnline={props.isOnline ?? true}
+      />
     ) : null;
 
   return (
@@ -717,8 +711,6 @@ export default function ChildDataSection(props: Props) {
           <PadronSprHistorial historial={historialSpr} loading={historialLoading} />
         )}
 
-        {panelClipOpcional}
-
         {!props.visitaSinDatosNino && (
           <div>
             <label className="field-label flex items-center gap-1">
@@ -834,6 +826,8 @@ export default function ChildDataSection(props: Props) {
             />
           </div>
         )}
+
+        {panelClipOpcional}
 
       </div>
     </div>

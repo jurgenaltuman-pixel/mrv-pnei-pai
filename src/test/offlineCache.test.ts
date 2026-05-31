@@ -65,7 +65,7 @@ describe('offlineCache', () => {
 
     await offlineCache.savePending(data as Record<string, unknown>);
 
-    expect(mockIDBFactory.open).toHaveBeenCalledWith('mrv_offline', 1);
+    expect(mockIDBFactory.open).toHaveBeenCalledWith('mrv_offline', 2);
     expect(mockStore.add).toHaveBeenCalled();
   });
 

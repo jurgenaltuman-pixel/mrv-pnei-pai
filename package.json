@@ -1,7 +1,7 @@
 {
   "name": "vite_react_shadcn_ts",
   "private": true,
-  "version": "2.6.12",
+  "version": "2.6.13",
   "description": "M R V — PNEI y PAI — MSPBS · registro nominal en terreno (soporte offline)",
   "author": "MSPBS — PNEI / PAI",
   "type": "module",
@@ -55,6 +55,7 @@
     "qa:full": "node scripts/qa-full.mjs",
     "aiven:admin": "node scripts/aiven-create-admin.mjs",
     "aiven:migrate-users": "node scripts/migrate-users-supabase-to-aiven.mjs",
+    "aiven:approve-migrated": "node scripts/backfill-approve-migrated-users.mjs",
     "aiven:migrate-auth": "node scripts/migrate-auth-passwords.mjs",
     "aiven:auth-status": "node scripts/aiven-auth-status.mjs",
     "aiven:export-users": "node scripts/export-users-sql.mjs",
