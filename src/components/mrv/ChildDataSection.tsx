@@ -437,30 +437,40 @@ export default function ChildDataSection(props: Props) {
           : 'bg-muted/50 border-border text-muted-foreground';
 
   const panelClipOpcional = !props.visitaSinDatosNino ? (
-    <RegistroClipAdjuntosSection
-      meta={{
-        tipo: tipoDocActual,
-        documento: props.documento.trim() || documentoClip,
-        nombre: props.nombre.trim(),
-      }}
-        adjuntos={clipActivoAdjuntos}
-        onAdjuntosChange={actualizarClipActivo}
-        alternativas={alternativasClip.length > 1 ? alternativasClip : undefined}
-        onElegirAlternativa={(m) => {
-          const p = sugerencias.find(
-            (s) =>
-              clipStorageKey(s.tipo_documento || tipoDoc, s.documento) ===
-              clipStorageKey(m.tipo, m.documento)
-          );
-          if (p) seleccionar(p);
-          else activarClipNino(m);
-        }}
-        sinHistorialSpr={clipSinHistorialSpr}
-        opcional
-        soloFotos
-        isOnline={props.isOnline ?? true}
-      />
-    ) : null;
+    <details className="rounded-lg border-2 border-[#0055A4]/25 bg-[#0055A4]/5 group">
+      <summary className="cursor-pointer px-3 py-2.5 text-sm font-bold text-[#0055A4] list-none flex items-center justify-between gap-2 [&::-webkit-details-marker]:hidden">
+        <span>Subir imágenes a Drive (opcional · máx. 2)</span>
+        <span className="text-[10px] font-normal text-muted-foreground group-open:hidden">Tocá para abrir</span>
+        <span className="text-[10px] font-normal text-muted-foreground hidden group-open:inline">Tocá para cerrar</span>
+      </summary>
+      <div className="px-2 pb-2">
+        <RegistroClipAdjuntosSection
+          meta={{
+            tipo: tipoDocActual,
+            documento: props.documento.trim() || documentoClip,
+            nombre: props.nombre.trim(),
+          }}
+          adjuntos={clipActivoAdjuntos}
+          onAdjuntosChange={actualizarClipActivo}
+          alternativas={alternativasClip.length > 1 ? alternativasClip : undefined}
+          onElegirAlternativa={(m) => {
+            const p = sugerencias.find(
+              (s) =>
+                clipStorageKey(s.tipo_documento || tipoDoc, s.documento) ===
+                clipStorageKey(m.tipo, m.documento)
+            );
+            if (p) seleccionar(p);
+            else activarClipNino(m);
+          }}
+          sinHistorialSpr={clipSinHistorialSpr}
+          opcional
+          soloFotos
+          embedded
+          isOnline={props.isOnline ?? true}
+        />
+      </div>
+    </details>
+  ) : null;
 
   return (
     <div className="section-card">

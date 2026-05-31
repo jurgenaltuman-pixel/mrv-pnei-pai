@@ -20,6 +20,8 @@ interface Props {
   opcional?: boolean;
   /** Solo fotos (sin transcripción). */
   soloFotos?: boolean;
+  /** Dentro de un <details> colapsable (sin borde/título duplicado). */
+  embedded?: boolean;
   isOnline?: boolean;
 }
 
@@ -32,6 +34,7 @@ export default function RegistroClipAdjuntosSection({
   sinHistorialSpr,
   opcional = true,
   soloFotos = false,
+  embedded = false,
   isOnline = true,
 }: Props) {
   const { toast } = useToast();
@@ -179,27 +182,52 @@ export default function RegistroClipAdjuntosSection({
   ).length;
 
   return (
-    <div className="rounded-lg border-2 border-[#0055A4]/25 bg-[#0055A4]/5 p-3 space-y-2.5">
-      <div className="flex items-start justify-between gap-2">
-        <p className="text-sm font-bold text-[#0055A4] flex items-center gap-1.5">
-          <ImagePlus className="w-4 h-4 shrink-0" />
-          Subir imágenes a Drive
-          <span className="font-normal text-[11px] text-muted-foreground">(opcional · máx. {MAX_IMAGES})</span>
-        </p>
-        {!isOnline ? (
-          <span className="text-[10px] font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full inline-flex items-center gap-1 shrink-0">
-            <CloudOff className="w-3 h-3" /> Offline
-          </span>
-        ) : flushing ? (
-          <span className="text-[10px] text-muted-foreground inline-flex items-center gap-1">
-            <Loader2 className="w-3 h-3 animate-spin" /> Sincronizando…
-          </span>
-        ) : (
-          <span className="text-[10px] text-emerald-700 inline-flex items-center gap-1 shrink-0">
-            <Cloud className="w-3 h-3" /> Online
-          </span>
-        )}
-      </div>
+    <div
+      className={
+        embedded
+          ? 'space-y-2.5'
+          : 'rounded-lg border-2 border-[#0055A4]/25 bg-[#0055A4]/5 p-3 space-y-2.5'
+      }
+    >
+      {!embedded && (
+        <div className="flex items-start justify-between gap-2">
+          <p className="text-sm font-bold text-[#0055A4] flex items-center gap-1.5">
+            <ImagePlus className="w-4 h-4 shrink-0" />
+            Subir imágenes a Drive
+            <span className="font-normal text-[11px] text-muted-foreground">(opcional · máx. {MAX_IMAGES})</span>
+          </p>
+          {!isOnline ? (
+            <span className="text-[10px] font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full inline-flex items-center gap-1 shrink-0">
+              <CloudOff className="w-3 h-3" /> Offline
+            </span>
+          ) : flushing ? (
+            <span className="text-[10px] text-muted-foreground inline-flex items-center gap-1">
+              <Loader2 className="w-3 h-3 animate-spin" /> Sincronizando…
+            </span>
+          ) : (
+            <span className="text-[10px] text-emerald-700 inline-flex items-center gap-1 shrink-0">
+              <Cloud className="w-3 h-3" /> Online
+            </span>
+          )}
+        </div>
+      )}
+      {embedded && (
+        <div className="flex justify-end">
+          {!isOnline ? (
+            <span className="text-[10px] font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+              <CloudOff className="w-3 h-3" /> Offline
+            </span>
+          ) : flushing ? (
+            <span className="text-[10px] text-muted-foreground inline-flex items-center gap-1">
+              <Loader2 className="w-3 h-3 animate-spin" /> Sincronizando…
+            </span>
+          ) : (
+            <span className="text-[10px] text-emerald-700 inline-flex items-center gap-1">
+              <Cloud className="w-3 h-3" /> Online
+            </span>
+          )}
+        </div>
+      )}
 
       {alternativas && alternativas.length > 1 && onElegirAlternativa && (
         <div className="flex flex-wrap gap-1">
