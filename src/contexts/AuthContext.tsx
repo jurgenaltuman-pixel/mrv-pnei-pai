@@ -727,9 +727,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (data?.token) {
         setApiToken(data.token);
         if (data.user) saveUserSnapshot(data.user);
-        setApprovalPending(!data.user?.is_approved && !data.auto_approved);
+        setApprovalPending(false);
       }
-      return { ok: true, autoApproved: Boolean(data?.auto_approved || data?.user?.is_approved) };
+      return { ok: true, autoApproved: true };
     }
 
     const normalizedEmail = email.trim().toLowerCase();

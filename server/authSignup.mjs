@@ -16,7 +16,7 @@ async function hasCredentials(userId) {
   return rows.length > 0;
 }
 
-/** Perfil precargado en nómina (import) sin cuenta activa aún. */
+/** Perfil precargado (nómina / import) por documento o usuario numérico. */
 async function findNominaPreload(docDigits) {
   if (docDigits.length < 4) return null;
   const { rows } = await query(
@@ -27,10 +27,6 @@ async function findNominaPreload(docDigits) {
        AND (
          nomina_documento = $1
          OR regexp_replace(COALESCE(username, ''), '[^0-9]', '', 'g') = $1
-       )
-       AND (
-         nomina_documento IS NOT NULL
-         OR length(regexp_replace(COALESCE(username, ''), '[^0-9]', '', 'g')) >= 5
        )
      ORDER BY (nomina_documento IS NOT NULL) DESC, updated_at DESC NULLS LAST
      LIMIT 1`,
@@ -52,6 +48,52 @@ async function findProfilesByEmailOrUsername(em, un) {
   return rows;
 }
 
+/** Cuenta activa = fila en auth_credentials (login posible). */
+async function findActiveAccountUserId({ email, username, excludeUserId = null }) {
+  const em = String(email || '').trim().toLowerCase();
+  const un = String(username || '').trim().toLowerCase();
+  const { rows } = await query(
+    `SELECT ac.user_id
+     FROM auth_credentials ac
+     LEFT JOIN profiles p ON p.user_id = ac.user_id
+     WHERE ($1::text <> '' AND lower(trim(ac.email)) = $1)
+        OR ($2::text <> '' AND lower(trim(p.username)) = $2)
+     LIMIT 1`,
+    [em, un]
+  );
+  const found = rows[0]?.user_id || null;
+  if (!found || !excludeUserId) return found;
+  return found === excludeUserId ? null : found;
+}
+
+async function upsertSignupCredentials(userId, email, passwordHash) {
+  const em = String(email || '').trim().toLowerCase();
+  await query(`DELETE FROM auth_credentials WHERE lower(trim(email)) = $1 AND user_id <> $2`, [em, userId]);
+  const { rows: cred } = await query(`SELECT user_id FROM auth_credentials WHERE user_id = $1 LIMIT 1`, [userId]);
+  if (cred[0]) {
+    await query('UPDATE auth_credentials SET email = $1, password_hash = $2 WHERE user_id = $3', [
+      em,
+      passwordHash,
+      userId,
+    ]);
+  } else {
+    await query(`INSERT INTO auth_credentials (user_id, email, password_hash) VALUES ($1,$2,$3)`, [
+      userId,
+      em,
+      passwordHash,
+    ]);
+  }
+}
+
+async function resolveClaimProfile(em, un, docDigits, nominaPreload) {
+  if (nominaPreload) return nominaPreload;
+  const candidates = await findProfilesByEmailOrUsername(em, un);
+  for (const p of candidates) {
+    if (!(await hasCredentials(p.user_id))) return p;
+  }
+  return null;
+}
+
 export async function handleAuthSignup(body) {
   const {
     email,
@@ -61,7 +103,6 @@ export async function handleAuthSignup(body) {
     assigned_region,
     assigned_distrito,
     assigned_servicio,
-    from_nomina,
     nomina_documento,
   } = body || {};
 
@@ -74,9 +115,8 @@ export async function handleAuthSignup(body) {
   if (pwErr) return { status: 400, body: { error: pwErr } };
 
   const docDigits = digitsOnly(nomina_documento) || digitsOnly(un);
-  const fromNomina = Boolean(from_nomina);
   const nominaPreload = await findNominaPreload(docDigits);
-  const autoApprove = fromNomina || Boolean(nominaPreload?.nomina_documento);
+  const autoApprove = true;
 
   let assignedRegion = String(assigned_region || '').trim() || null;
   let assignedDistrito = String(assigned_distrito || '').trim() || null;
@@ -88,30 +128,27 @@ export async function handleAuthSignup(body) {
     if (!assignedServicio) assignedServicio = nominaPreload.assigned_servicio?.trim() || null;
   }
 
-  const scopeLocked = autoApprove && Boolean(assignedRegion && assignedDistrito);
+  const scopeLocked = Boolean(assignedRegion && assignedDistrito);
   const hash = await bcrypt.hash(password, 10);
   const now = new Date().toISOString();
   const nominaDocStored = docDigits.length >= 4 ? docDigits : null;
 
-  const candidates = await findProfilesByEmailOrUsername(em, un);
-  for (const p of candidates) {
-    if (await hasCredentials(p.user_id)) {
-      return {
-        status: 409,
-        body: { error: 'Correo o usuario ya registrado. Usá «Ingresar» si ya tenés cuenta.' },
-      };
-    }
-  }
+  const claim = await resolveClaimProfile(em, un, docDigits, nominaPreload);
+  const claimUserId = claim?.user_id || null;
 
-  let claim = null;
-  for (const p of candidates) {
-    if (!(await hasCredentials(p.user_id))) {
-      claim = p;
-      break;
-    }
+  const otherEmailAccount = await findActiveAccountUserId({ email: em, username: '', excludeUserId: claimUserId });
+  if (otherEmailAccount) {
+    return {
+      status: 409,
+      body: { error: 'Este correo ya tiene cuenta activa. Usá «Ingresar» o «Olvidé mi contraseña».' },
+    };
   }
-  if (!claim && nominaPreload && !(await hasCredentials(nominaPreload.user_id))) {
-    claim = nominaPreload;
+  const otherUserAccount = await findActiveAccountUserId({ email: '', username: un, excludeUserId: claimUserId });
+  if (otherUserAccount) {
+    return {
+      status: 409,
+      body: { error: 'Este usuario ya tiene cuenta activa. Usá «Ingresar» con tu usuario y contraseña.' },
+    };
   }
 
   let userId;
@@ -123,22 +160,21 @@ export async function handleAuthSignup(body) {
          username = $3,
          display_name = $4,
          is_active = true,
-         is_approved = $5,
+         is_approved = true,
          must_change_password = false,
-         assigned_region = COALESCE($6, assigned_region),
-         assigned_distrito = COALESCE($7, assigned_distrito),
-         assigned_servicio = COALESCE($8, assigned_servicio),
-         nomina_documento = COALESCE($9, nomina_documento),
-         scope_locked = $10,
-         approved_at = CASE WHEN $5 THEN COALESCE(approved_at, now()) ELSE approved_at END,
-         updated_at = $11
+         assigned_region = COALESCE($5, assigned_region),
+         assigned_distrito = COALESCE($6, assigned_distrito),
+         assigned_servicio = COALESCE($7, assigned_servicio),
+         nomina_documento = COALESCE($8, nomina_documento),
+         scope_locked = $9,
+         approved_at = COALESCE(approved_at, now()),
+         updated_at = $10
        WHERE user_id = $1`,
       [
         userId,
         em,
         un,
         displayName || un,
-        autoApprove,
         assignedRegion,
         assignedDistrito,
         assignedServicio,
@@ -147,11 +183,7 @@ export async function handleAuthSignup(body) {
         now,
       ]
     );
-    await query(
-      `INSERT INTO auth_credentials (user_id, email, password_hash) VALUES ($1,$2,$3)
-       ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email, password_hash = EXCLUDED.password_hash`,
-      [userId, em, hash]
-    );
+    await upsertSignupCredentials(userId, em, hash);
     await query(`INSERT INTO user_roles (user_id, role) VALUES ($1,'user') ON CONFLICT DO NOTHING`, [userId]);
   } else {
     userId = randomUUID();
@@ -160,13 +192,12 @@ export async function handleAuthSignup(body) {
          user_id, email, username, display_name, is_active, is_approved, must_change_password,
          assigned_region, assigned_distrito, assigned_servicio, nomina_documento, scope_locked,
          approved_at, created_at, updated_at
-       ) VALUES ($1,$2,$3,$4,true,$5,false,$6,$7,$8,$9,$10, CASE WHEN $5 THEN now() ELSE NULL END, $11,$11)`,
+       ) VALUES ($1,$2,$3,$4,true,true,false,$5,$6,$7,$8,$9,now(),$10,$10)`,
       [
         userId,
         em,
         un,
         displayName || un,
-        autoApprove,
         assignedRegion,
         assignedDistrito,
         assignedServicio,
@@ -175,11 +206,7 @@ export async function handleAuthSignup(body) {
         now,
       ]
     );
-    await query(
-      `INSERT INTO auth_credentials (user_id, email, password_hash) VALUES ($1,$2,$3)
-       ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email, password_hash = EXCLUDED.password_hash`,
-      [userId, em, hash]
-    );
+    await upsertSignupCredentials(userId, em, hash);
     await query(`INSERT INTO user_roles (user_id, role) VALUES ($1,'user') ON CONFLICT DO NOTHING`, [userId]);
   }
 
@@ -193,7 +220,7 @@ export async function handleAuthSignup(body) {
         email: em,
         nombre: displayName || un,
         username: un,
-        is_approved: autoApprove,
+        is_approved: true,
         must_change_password: false,
       },
       auto_approved: autoApprove,
