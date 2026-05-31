@@ -92,7 +92,7 @@ export default function ChildDataSection(props: Props) {
   const [clipPorNino, setClipPorNino] = useState<Record<string, RegistroClipAdjuntos>>({});
   const [clipActivoMeta, setClipActivoMeta] = useState<ClipNinoMeta | null>(null);
   const [padronSearchStatus, setPadronSearchStatus] = useState<PadronSearchStatus>({ kind: 'idle' });
-  const [clipOpcionalAbierto, setClipOpcionalAbierto] = useState(false);
+  const [clipOpcionalAbierto, setClipOpcionalAbierto] = useState(true);
 
   const activarClipNino = useCallback(
     (meta: ClipNinoMeta) => {
@@ -437,13 +437,15 @@ export default function ChildDataSection(props: Props) {
   const panelClipOpcional =
     !props.visitaSinDatosNino && clipActivoMeta && documentoClip.length >= 4 ? (
       <details
-        className="rounded-lg border border-dashed border-muted-foreground/40 bg-muted/20"
+        className="rounded-lg border-2 border-[#0055A4]/30 bg-[#0055A4]/5"
         open={clipOpcionalAbierto}
         onToggle={(e) => setClipOpcionalAbierto((e.target as HTMLDetailsElement).open)}
       >
-        <summary className="cursor-pointer px-3 py-2 text-xs font-bold text-muted-foreground list-none flex items-center justify-between">
-          <span>Adjuntos opcionales (transcripción / fotos Drive)</span>
-          <span className="text-[10px] font-normal">No obligatorio</span>
+        <summary className="cursor-pointer px-3 py-2.5 text-sm font-bold text-[#0055A4] list-none flex items-center justify-between gap-2">
+          <span className="flex items-center gap-2">
+            Subir transcripción y fotos (Drive)
+          </span>
+          <span className="text-[10px] font-normal text-muted-foreground">Opcional · tocá para abrir/cerrar</span>
         </summary>
         <div className="px-2 pb-2">
           <RegistroClipAdjuntosSection

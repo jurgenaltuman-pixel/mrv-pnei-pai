@@ -15,6 +15,24 @@ En [Vercel → proyecto → Settings → Environment Variables](https://vercel.c
 | `PADRON_DEDICADO_URL` | Padrón shard **1** (`mrvpai2…`, ~422k filas). Sin esto la app solo encuentra la mitad del padrón. |
 
 Si el login falla con `ECONNREFUSED` en health: en [Aiven](https://console.aiven.io) el servicio operativo debe estar **Running** (no mezclar login en `mrvpai2`).
+
+### Usuarios (login / registro)
+
+- **Sí:** altas y login van a **`DATABASE_URL` (operativa 21502)** → tablas `profiles`, `auth_credentials`, `user_roles`.
+- El padrón de niños **no** se guarda ahí; está en `mrvpai1` + `mrvpai2`.
+
+### Disco operativa al 100%
+
+Si en la operativa sigue existiendo `base_personas` (~600 MB duplicado), liberá espacio (padrón ya en los 2 shards):
+
+```bash
+npm run aiven:free-operational-disk -- --confirm
+```
+
+### Subir fotos / transcripción (Drive)
+
+Visible en **Identificación del niño** → buscar por documento (≥4 dígitos) → bloque azul **«Subir transcripción y fotos (Drive)»**.  
+En Vercel hace falta: `GOOGLE_DRIVE_CLIENT_ID`, `GOOGLE_DRIVE_CLIENT_SECRET`, `GOOGLE_DRIVE_REFRESH_TOKEN` (ver `docs/GOOGLE-DRIVE-ADJUNTOS.md`).
 | `JWT_SECRET` | Clave larga aleatoria para tokens de sesión (misma en todos los deploys; si cambia, los APK viejos pierden sesión) |
 
 Opcional:

@@ -1,7 +1,7 @@
 {
   "name": "vite_react_shadcn_ts",
   "private": true,
-  "version": "2.6.10",
+  "version": "2.6.11",
   "description": "M R V — PNEI y PAI — MSPBS · registro nominal en terreno (soporte offline)",
   "author": "MSPBS — PNEI / PAI",
   "type": "module",
@@ -49,6 +49,7 @@
     "aiven:padron-shard-split": "node scripts/padron-shard-split-run.mjs",
     "aiven:migrate-padron-dedicated": "node scripts/migrate-padron-to-dedicated.mjs",
     "aiven:drop-padron-operational": "node scripts/aiven-drop-padron-from-operational.mjs --confirm",
+    "aiven:free-operational-disk": "node scripts/aiven-free-operational-disk.mjs --confirm",
     "aiven:import-padron-jsonl": "node scripts/import-padron-jsonl.mjs",
     "aiven:padron-split-all": "node scripts/aiven-padron-split-all.mjs",
     "qa:full": "node scripts/qa-full.mjs",
