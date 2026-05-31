@@ -276,6 +276,12 @@ export default function RegistroClipAdjuntosSection({
         {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
         {isOnline ? 'Subir imágenes a Drive' : 'Guardar imágenes (subir al reconectar)'}
       </button>
+      {!puedeSubir && (
+        <p className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5">
+          Completá el <strong>nombre</strong> (mín. 2 letras) y el <strong>documento</strong> (mín. 4 caracteres) del niño/a
+          para habilitar la subida.
+        </p>
+      )}
 
       {(adjuntos.enlace_imagen_1 || adjuntos.enlace_imagen_2 || pendingCount > 0) && (
         <ul className="text-[11px] space-y-1 break-all">

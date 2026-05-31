@@ -20,6 +20,7 @@ export async function forceAppUpdate(): Promise<void> {
     localStorage.removeItem(BUILD_STORAGE_KEY);
     localStorage.removeItem('mrv-sw-sweep-2026-05-27-chunk-mapview');
     localStorage.removeItem('mrv-sw-sweep-2026-05-28-labels-map');
+    localStorage.removeItem('mrv-sw-sweep-2026-05-31-drive-upload');
   } catch {
     /* ignore */
   }

@@ -436,17 +436,13 @@ export default function ChildDataSection(props: Props) {
           ? 'bg-destructive/10 border-destructive/40 text-destructive'
           : 'bg-muted/50 border-border text-muted-foreground';
 
-  const panelClipOpcional =
-    !props.visitaSinDatosNino &&
-    clipActivoMeta &&
-    props.documento.trim().length >= 4 &&
-    props.nombre.trim().length >= 2 ? (
-      <RegistroClipAdjuntosSection
-        meta={{
-          ...clipActivoMeta,
-          tipo: tipoDocActual,
-          nombre: clipActivoMeta.nombre || props.nombre.trim(),
-        }}
+  const panelClipOpcional = !props.visitaSinDatosNino ? (
+    <RegistroClipAdjuntosSection
+      meta={{
+        tipo: tipoDocActual,
+        documento: props.documento.trim() || documentoClip,
+        nombre: props.nombre.trim(),
+      }}
         adjuntos={clipActivoAdjuntos}
         onAdjuntosChange={actualizarClipActivo}
         alternativas={alternativasClip.length > 1 ? alternativasClip : undefined}
