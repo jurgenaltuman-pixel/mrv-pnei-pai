@@ -160,6 +160,9 @@ export const PendingRegistroPayloadSchema = z.object({
   dosis_spr: z.string().nullable().optional(),
   estado_intervencion: z.string().nullable().optional(),
   tiene_cvs: z.boolean().nullable().optional(),
+  transcripcion_clip: z.string().max(2000).nullable().optional(),
+  enlace_imagen_1: z.string().max(500).nullable().optional(),
+  enlace_imagen_2: z.string().max(500).nullable().optional(),
 });
 
 /**

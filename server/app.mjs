@@ -823,6 +823,51 @@ export function createApp() {
     }
   });
 
+  app.post('/api/padron/busqueda-adjuntos', authMiddleware, async (req, res) => {
+    try {
+      const { uploadBufferToGoogleDrive, isGoogleDriveConfigured } = await import('./googleDrive.mjs');
+      if (!isGoogleDriveConfigured()) {
+        res.status(503).json({
+          error:
+            'Google Drive no configurado. Ver docs/GOOGLE-DRIVE-ADJUNTOS.md (GOOGLE_DRIVE_CLIENT_ID, SECRET, REFRESH_TOKEN).',
+        });
+        return;
+      }
+      const body = req.body || {};
+      const documento = String(body.documento || '').trim();
+      if (documento.length < 4) {
+        res.status(400).json({ error: 'documento inválido' });
+        return;
+      }
+      const images = Array.isArray(body.images) ? body.images : [];
+      if (images.length === 0 || images.length > 2) {
+        res.status(400).json({ error: 'Enviá entre 1 y 2 imágenes' });
+        return;
+      }
+      const urls = [];
+      for (const img of images) {
+        const b64 = String(img.dataBase64 || '').replace(/^data:[^;]+;base64,/, '');
+        if (!b64) {
+          res.status(400).json({ error: 'dataBase64 vacío' });
+          return;
+        }
+        const buf = Buffer.from(b64, 'base64');
+        if (buf.length > 5_000_000) {
+          res.status(400).json({ error: 'Imagen demasiado grande (máx. ~5 MB)' });
+          return;
+        }
+        const mimeType = String(img.mimeType || 'image/jpeg');
+        const filename = String(img.filename || 'imagen.jpg').slice(0, 80);
+        const up = await uploadBufferToGoogleDrive({ buffer: buf, mimeType, filename, documento });
+        urls.push(up);
+      }
+      res.json({ urls });
+    } catch (e) {
+      console.error('[busqueda-adjuntos]', e);
+      res.status(500).json({ error: e.message || 'Error al subir a Drive' });
+    }
+  });
+
   app.post('/api/padron/datos-personales', authMiddleware, async (req, res) => {
     try {
       const body = req.body || {};
@@ -935,6 +980,7 @@ export function createApp() {
         'fecha_nacimiento', 'edad', 'sexo', 'libreta', 'estado_vacuna', 'motivo', 'latitud', 'longitud',
         'tipo_vivienda', 'esquema_completo', 'fuente_verificacion', 'accion_tomada', 'observaciones',
         'fecha_dosis_spr', 'dosis_spr', 'estado_intervencion', 'tiene_cvs', 'tipo_documento', 'responsable_id',
+        'transcripcion_clip', 'enlace_imagen_1', 'enlace_imagen_2',
       ];
       const vals = cols.map((c) => (c === 'user_id' ? req.user.sub : r[c] ?? null));
       const placeholders = cols.map((_, i) => `$${i + 1}`).join(',');
@@ -956,6 +1002,51 @@ export function createApp() {
       });
     } catch (e) {
       console.error(e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  function countFridayAlertasFromRows(rows) {
+    let pendientesTranscripcion = 0;
+    let cambiosResidencia = 0;
+    for (const r of rows) {
+      const tieneImg = Boolean(
+        String(r.enlace_imagen_1 || '').trim() || String(r.enlace_imagen_2 || '').trim()
+      );
+      if (tieneImg && !String(r.transcripcion_clip || '').trim()) pendientesTranscripcion += 1;
+      if (String(r.observaciones || '').includes('[Cambio de residencia]')) {
+        cambiosResidencia += 1;
+      }
+    }
+    return { pendientesTranscripcion, cambiosResidencia };
+  }
+
+  /** Viernes: fotos sin transcripción y cambios de residencia (últimos 7 días). */
+  app.get('/api/registros/alertas-viernes', authMiddleware, async (req, res) => {
+    try {
+      const roles = await getUserRoles(req.user.sub);
+      const scope = await loadProfileScope(req.user.sub);
+      const reportScope = resolveReportScope(scope, roles);
+      let rows;
+      if (reportScope.mode === 'own') {
+        ({ rows } = await query(
+          `SELECT enlace_imagen_1, enlace_imagen_2, transcripcion_clip, observaciones
+           FROM registros_vacunacion
+           WHERE user_id = $1 AND fecha_hora >= NOW() - INTERVAL '7 days'`,
+          [req.user.sub]
+        ));
+      } else {
+        ({ rows } = await query(
+          `SELECT enlace_imagen_1, enlace_imagen_2, transcripcion_clip, observaciones, region, distrito, servicio, barrio
+           FROM registros_vacunacion
+           WHERE fecha_hora >= NOW() - INTERVAL '7 days'
+           ORDER BY fecha_hora DESC
+           LIMIT 20000`
+        ));
+        rows = filterRowsByReportScope(rows, reportScope);
+      }
+      res.json(countFridayAlertasFromRows(rows));
+    } catch (e) {
       res.status(500).json({ error: e.message });
     }
   });

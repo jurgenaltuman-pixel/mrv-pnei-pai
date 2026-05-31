@@ -19,6 +19,8 @@ Opcional:
 | Variable | Descripción |
 |----------|-------------|
 | `CORS_ORIGIN` | Orígenes permitidos separados por coma (por defecto ya incluye `mrvpai.web.app` y Vercel) |
+| `GOOGLE_DRIVE_CLIENT_ID`, `GOOGLE_DRIVE_CLIENT_SECRET`, `GOOGLE_DRIVE_REFRESH_TOKEN` | Adjuntos de búsqueda → Drive ([GOOGLE-DRIVE-ADJUNTOS.md](./GOOGLE-DRIVE-ADJUNTOS.md)) |
+| `GOOGLE_DRIVE_FOLDER_ID` | (Opcional) Carpeta destino en Drive |
 
 Después de cambiar variables: **Redeploy** en Vercel (Deployments → ⋮ → Redeploy).
 
@@ -69,8 +71,9 @@ Asignación desde **Admin → Usuarios y roles** (admin / super admin).
 
 | Variable | Contenido |
 |----------|-----------|
-| `PADRON_DATABASE_URL` | Shard **0** (~50% niños) — instancia 1 GB `mrv-pai-mrvpai` |
-| `PADRON_DATABASE_URL_2` | Shard **1** (~50%) — misma URL que `DATABASE_URL` (operativa) |
+| `PADRON_DATABASE_URL` | Shard **0** (~50% niños) — `mrvpai1-mrvpai` (11822) |
+| `PADRON_DEDICADO_URL` | Shard **1** (~50%) — segunda instancia padrón (`pg-1fca3dda-mrv…` :15143) |
+| `PADRON_DATABASE_URL_2` | (Legacy) solo si no usás `PADRON_DEDICADO_URL` |
 
 La API consulta **ambos** shards y une resultados. Importación:
 

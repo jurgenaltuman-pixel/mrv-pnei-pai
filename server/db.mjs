@@ -83,7 +83,8 @@ export function getPadronPoolForDocumento(documento) {
 export function getPadronShardUrls() {
   const urls = [];
   if (process.env.PADRON_DATABASE_URL) urls.push(process.env.PADRON_DATABASE_URL);
-  if (process.env.PADRON_DATABASE_URL_2) urls.push(process.env.PADRON_DATABASE_URL_2);
+  const shard1 = process.env.PADRON_DEDICADO_URL || process.env.PADRON_DATABASE_URL_2;
+  if (shard1 && shard1 !== process.env.PADRON_DATABASE_URL) urls.push(shard1);
   return urls;
 }
 

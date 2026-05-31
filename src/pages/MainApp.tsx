@@ -27,6 +27,10 @@ import {
 import { resolveFechaNacimientoPersona } from '@/lib/persona-fecha';
 import { resolveSexoPersona } from '@/lib/persona-sexo';
 import { mapPadronApiPersona } from '@/services/dataService';
+import {
+  REGISTRO_CLIP_ADJUNTOS_VACIO,
+  type RegistroClipAdjuntos,
+} from '@/lib/registro-clip-adjuntos';
 import type { FuenteVerificacion, AccionTomada } from '@/lib/mrv-constants';
 import { acumularJornada } from '@/lib/jornada-storage';
 import {
@@ -36,6 +40,8 @@ import {
 } from '@/lib/visit-session-storage';
 import { CampaignAppHeader } from '@/components/branding/CampaignAppHeader';
 import { PadronOfflineBanner } from '@/components/mrv/PadronOfflineBanner';
+import FridayReminderBanner from '@/components/mrv/FridayReminderBanner';
+import { useFridayReminder } from '@/hooks/useFridayReminder';
 import ProfileScopeEditor from '@/components/mrv/ProfileScopeEditor';
 import { usePwaInstall } from '@/hooks/usePwaInstall';
 import { PageSkeleton, MapSkeleton } from '@/components/mrv/PageSkeleton';
@@ -115,6 +121,7 @@ export default function MainApp() {
   }, []);
 
   const { user, logout } = useAuth();
+  const fridayReminder = useFridayReminder(Boolean(user?.id));
   const { isAdmin, isSuperAdmin } = useRole();
   const { data: profileScope } = useProfileScope();
   const ubicacionAsignacionFija = ubicacionBloqueadaPorAsignacion(profileScope, {
@@ -185,6 +192,7 @@ export default function MainApp() {
   const ubicacionPadronRef = useRef<UbicacionSanitariaBaseline | null>(null);
   const scopeInicialAplicadoRef = useRef(false);
   const [rechazoVacunacion, setRechazoVacunacion] = useState(false);
+  const [clipAdjuntos, setClipAdjuntos] = useState<RegistroClipAdjuntos>(REGISTRO_CLIP_ADJUNTOS_VACIO);
   const [workflowStep, setWorkflowStep] = useState(1);
   const [contador, setContador] = useState<ContadorViviendas>({ efectivas: 0, noEfectivas: 0, fallidas: 0, renuentes: 0 });
   // Por defecto, tipo de casa 'efectiva'
@@ -751,6 +759,7 @@ export default function MainApp() {
     setCambioResidencia(false);
     ubicacionPadronRef.current = null;
     setNinoEnEdicion(null);
+    setClipAdjuntos(REGISTRO_CLIP_ADJUNTOS_VACIO);
   }, []);
 
   const cancelarEdicionNinoCasa = useCallback(() => {
@@ -960,6 +969,9 @@ export default function MainApp() {
       dosis_spr: dosisSpr,
       estado_intervencion: rechazoVacunacion ? 'rechazo_vacunacion' : null,
       tiene_cvs: visitaNfr ? null : estadoVacuna === 'vacunado',
+      transcripcion_clip: visitaNfr ? null : clipAdjuntos.transcripcion_clip?.trim() || null,
+      enlace_imagen_1: visitaNfr ? null : clipAdjuntos.enlace_imagen_1?.trim() || null,
+      enlace_imagen_2: visitaNfr ? null : clipAdjuntos.enlace_imagen_2?.trim() || null,
     };
 
     // VALIDACIÓN CRÍTICA: Asegurar que estado_vacuna no sea null
@@ -1076,6 +1088,7 @@ export default function MainApp() {
     setCambioResidencia(false);
     ubicacionPadronRef.current = null;
     setRechazoVacunacion(false);
+    setClipAdjuntos(REGISTRO_CLIP_ADJUNTOS_VACIO);
     setWorkflowStep(1);
     const keyMap = {
       efectiva: 'efectivas',
@@ -1111,6 +1124,13 @@ export default function MainApp() {
         pwaInstall={canInstall ? { canInstall: true, onInstall: install } : undefined}
       />
       <PadronOfflineBanner isOnline={isOnline} />
+      {fridayReminder.visible && fridayReminder.alertas && (
+        <FridayReminderBanner
+          alertas={fridayReminder.alertas}
+          onDismissTemporary={fridayReminder.dismissTemporary}
+          onConfirmProcessed={fridayReminder.confirmProcessed}
+        />
+      )}
 
       {user && (
         <ProfileScopeEditor
@@ -1231,6 +1251,7 @@ export default function MainApp() {
                     regionSanitaria={regionNombre}
                     distrito={distritoNombre}
                     servicioSalud={servicioNombre}
+                    onClipAdjuntosChange={setClipAdjuntos}
                   />
                 )}
                 renderVerificacion={() => (

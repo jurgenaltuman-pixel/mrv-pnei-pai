@@ -230,6 +230,9 @@ export interface RegistroMRV {
   estado_intervencion?: string | null;
   tiene_cvs?: boolean | null;
   tipo_documento?: string | null;
+  transcripcion_clip?: string | null;
+  enlace_imagen_1?: string | null;
+  enlace_imagen_2?: string | null;
 }
 
 export interface BusquedaAvanzadaFiltros {
@@ -1113,6 +1116,9 @@ export const dataService = {
         estado_intervencion: registro.estado_intervencion ?? null,
         tiene_cvs: registro.tiene_cvs ?? null,
         tipo_documento: (registro as { tipo_documento?: string }).tipo_documento ?? null,
+        transcripcion_clip: registro.transcripcion_clip?.trim() || null,
+        enlace_imagen_1: registro.enlace_imagen_1?.trim() || null,
+        enlace_imagen_2: registro.enlace_imagen_2?.trim() || null,
       });
       if (!saved.ok || !saved.id) {
         console.error('guardarRegistro API:', saved.error);
@@ -1260,7 +1266,7 @@ export const dataService = {
     return { totalVacunados, totalNoVacunados, porDistrito, viviendas, esquema };
   },
 
-  async getRegistros(limit = 3000, opts?: { national?: boolean }): Promise<RegistroMRV[]> {
+  async getRegistros(limit = 3000, opts?: { national?: boolean; useReportApi?: boolean }): Promise<RegistroMRV[]> {
     const lim = Math.max(100, Math.min(limit, 10000));
 
     const mapRows = (rows: any[]): RegistroMRV[] =>
@@ -1315,8 +1321,8 @@ export const dataService = {
 
     try {
       if (useRegistrosApi()) {
-        const path = opts?.national
-          ? `/api/admin/registros?limit=${lim}&national=1`
+        const path = opts?.useReportApi
+          ? `/api/admin/registros?limit=${lim}&national=${opts?.national ? '1' : '0'}`
           : `/api/registros?limit=${lim}`;
         const { data: apiRes, error } = await mrvApiFetch<{ data: Record<string, unknown>[] }>(path);
         if (error) return await loadSnapshot();

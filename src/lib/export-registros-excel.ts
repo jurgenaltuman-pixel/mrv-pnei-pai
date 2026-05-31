@@ -102,6 +102,9 @@ export function mapApiRowToRegistroMRV(row: Record<string, unknown>): RegistroMR
           ? false
           : null,
     tipo_documento: row.tipo_documento != null ? String(row.tipo_documento) : null,
+    transcripcion_clip: row.transcripcion_clip != null ? String(row.transcripcion_clip) : null,
+    enlace_imagen_1: row.enlace_imagen_1 != null ? String(row.enlace_imagen_1) : null,
+    enlace_imagen_2: row.enlace_imagen_2 != null ? String(row.enlace_imagen_2) : null,
   };
 }
 
@@ -146,6 +149,9 @@ export function registroToExcelRow(r: RegistroMRV & { tipo_documento?: string | 
     longitud: lng,
     coordenadas_wgs84: tieneGps ? `${lat},${lng}` : '',
     enlace_google_maps: mapsUrl,
+    transcripcion_clip: r.transcripcion_clip || '',
+    enlace_imagen_1: r.enlace_imagen_1 || '',
+    enlace_imagen_2: r.enlace_imagen_2 || '',
     almacenamiento: 'Aiven (registros_vacunacion)',
   };
 }
