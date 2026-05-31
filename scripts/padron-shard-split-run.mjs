@@ -19,9 +19,13 @@ const csv =
 /** Shard 0: dedicada 1GB (11822). Shard 1: segunda instancia padrón (15143) si existe, si no operativa. */
 const shard0Url = process.env.PADRON_DATABASE_URL;
 const shard1Url =
-  process.env.PADRON_DEDICADO_URL ||
-  process.env.PADRON_DATABASE_URL_2 ||
-  process.env.DATABASE_URL;
+  process.env.PADRON_DEDICADO_URL || process.env.PADRON_DATABASE_URL_2;
+if (!shard1Url) {
+  console.error(
+    'Falta PADRON_DEDICADO_URL (o PADRON_DATABASE_URL_2) en .env.local — no usar DATABASE_URL operativa para shard 1.'
+  );
+  process.exit(1);
+}
 const maxWaitMin = Number(
   process.argv.find((a) => a.startsWith('--max-wait-min='))?.split('=')[1] || 45
 );

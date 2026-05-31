@@ -23,13 +23,16 @@ export const useRegistrosApi = () => USE_MRV_API;
 /** @deprecated usar USE_SUPABASE_ORG / USE_SUPABASE_PADRON */
 export const USE_SUPABASE_CATALOG = USE_SUPABASE_ORG || USE_SUPABASE_PADRON;
 
+import { isNativeApp } from '@/lib/capacitor-platform';
+
 /** Producción por defecto (Firebase PWA, APK, builds sin .env). */
 export const MRV_API_PRODUCTION_DEFAULT = 'https://rapid-vaccinator-main.vercel.app';
 
 /**
  * Resuelve la base de la API MRV.
  * - VITE_MRV_API_URL en build si existe.
- * - Vercel / localhost: mismo origen (vacío → /api).
+ * - App nativa (Capacitor): siempre API en Vercel (el WebView usa https://localhost).
+ * - Vercel / localhost web: mismo origen (vacío → /api).
  * - Firebase Hosting y otros estáticos: API en Vercel.
  */
 export function resolveMrvApiBaseUrl(): string {
@@ -37,6 +40,9 @@ export function resolveMrvApiBaseUrl(): string {
   if (fromEnv) return fromEnv;
 
   if (typeof window !== 'undefined') {
+    if (isNativeApp()) {
+      return MRV_API_PRODUCTION_DEFAULT;
+    }
     const host = window.location.hostname.toLowerCase();
     if (host === 'localhost' || host === '127.0.0.1' || host.endsWith('.vercel.app')) {
       return '';

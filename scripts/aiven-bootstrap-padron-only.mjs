@@ -9,11 +9,16 @@ import { connectAivenWritable, createAivenClient } from './lib/pg-aiven.mjs';
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 loadEnv(root);
 
-const url = process.env.PADRON_DATABASE_URL;
+const urlFromArg = process.argv.find((a) => a.startsWith('--url='))?.split('=').slice(1).join('=');
+const url =
+  urlFromArg ||
+  process.env.PADRON_DEDICADO_URL ||
+  process.env.PADRON_DATABASE_URL;
 if (!url) {
-  console.error('Falta PADRON_DATABASE_URL en .env.local (instancia dedicada padrón)');
+  console.error('Falta PADRON_DATABASE_URL / PADRON_DEDICADO_URL o --url= en .env.local');
   process.exit(1);
 }
+console.log('Bootstrap →', url.replace(/:[^:@]+@/, ':****@'));
 
 const client = createAivenClient(url);
 await connectAivenWritable(client);

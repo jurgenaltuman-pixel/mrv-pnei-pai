@@ -30,7 +30,11 @@ const SHARDS = Number(process.argv.find((a) => a.startsWith('--shards='))?.split
 const urlFromArg = process.argv.find((a) => a.startsWith('--url='))?.split('=').slice(1).join('=');
 const url =
   urlFromArg ||
-  (TARGET_SHARD === 1 ? process.env.PADRON_DATABASE_URL_2 || process.env.DATABASE_URL : null) ||
+  (TARGET_SHARD === 1
+    ? process.env.PADRON_DEDICADO_URL ||
+      process.env.PADRON_DATABASE_URL_2 ||
+      process.env.PADRON_DATABASE_URL
+    : null) ||
   process.env.PADRON_DATABASE_URL;
 if (!url) {
   console.error('Falta PADRON_DATABASE_URL o --url=');

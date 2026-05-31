@@ -11,8 +11,9 @@ En [Vercel → proyecto → Settings → Environment Variables](https://vercel.c
 | Variable | Descripción |
 |----------|-------------|
 | `DATABASE_URL` | PostgreSQL Aiven **operativa** (usuarios, login, registros, nómina) |
-| `PADRON_DATABASE_URL` | PostgreSQL Aiven **solo padrón** (`mrv-pai-mrvpai`, ~830k filas en `base_personas`). Las búsquedas de personas usan **solo** esta URL. |
-| `JWT_SECRET` | Clave larga aleatoria para tokens de sesión |
+| `PADRON_DATABASE_URL` | Padrón shard **0** (`mrvpai1…`, ~393k filas) |
+| `PADRON_DEDICADO_URL` | Padrón shard **1** (`mrvpai2…`, ~422k filas). Sin esto la app solo encuentra la mitad del padrón. |
+| `JWT_SECRET` | Clave larga aleatoria para tokens de sesión (misma en todos los deploys; si cambia, los APK viejos pierden sesión) |
 
 Opcional:
 
@@ -72,7 +73,7 @@ Asignación desde **Admin → Usuarios y roles** (admin / super admin).
 | Variable | Contenido |
 |----------|-----------|
 | `PADRON_DATABASE_URL` | Shard **0** (~50% niños) — `mrvpai1-mrvpai` (11822) |
-| `PADRON_DEDICADO_URL` | Shard **1** (~50%) — segunda instancia padrón (`pg-1fca3dda-mrv…` :15143) |
+| `PADRON_DEDICADO_URL` | Shard **1** (~50%) — segunda instancia padrón (`mrvpai2-mrv…` :15143) |
 | `PADRON_DATABASE_URL_2` | (Legacy) solo si no usás `PADRON_DEDICADO_URL` |
 
 La API consulta **ambos** shards y une resultados. Importación:
