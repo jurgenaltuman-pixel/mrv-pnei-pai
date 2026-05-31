@@ -1,7 +1,7 @@
 {
   "name": "vite_react_shadcn_ts",
   "private": true,
-  "version": "2.6.9",
+  "version": "2.6.10",
   "description": "M R V — PNEI y PAI — MSPBS · registro nominal en terreno (soporte offline)",
   "author": "MSPBS — PNEI / PAI",
   "type": "module",
@@ -35,6 +35,8 @@
     "api:install": "cd server && npm install",
     "api:dev": "cd server && npm run dev",
     "vercel:sync-supabase-env": "node scripts/sync-vercel-supabase-env.mjs",
+    "vercel:sync-production": "node scripts/sync-vercel-production.mjs",
+    "vercel:deploy": "node scripts/sync-vercel-production.mjs --deploy",
     "verify:org-barrios": "node scripts/verify-org-barrios.mjs",
     "aiven:bootstrap": "node scripts/aiven-bootstrap.mjs",
     "aiven:nomina-column": "node scripts/aiven-nomina-column.mjs",
