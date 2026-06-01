@@ -37,7 +37,8 @@ describe('app mobile guards', () => {
   it('OCR escáner solo en app nativa (ChildDataSection)', () => {
     const child = fs.readFileSync(path.join(root, 'src/components/mrv/ChildDataSection.tsx'), 'utf8');
     expect(child).toContain('isNativeApp()');
-    expect(child).toContain('CedulaOcrButtons');
+    expect(child).toContain('CedulaOcrMinimized');
+    expect(child).toContain('showCedulaScan');
   });
 
   it('OCR APK: flujo escanear y autocompletar', () => {
@@ -53,6 +54,15 @@ describe('app mobile guards', () => {
     expect(src).toContain('recognizeWithModes');
     expect(src).toContain('hasUsefulCedulaData');
     expect(src).toContain('buildOcrVariantCanvases');
+  });
+
+  it('descarga padrón en segundo plano (APK)', () => {
+    const src = fs.readFileSync(
+      path.join(root, 'src/services/padron-background-download.ts'),
+      'utf8'
+    );
+    expect(src).toContain('startPadronBackgroundDownload');
+    expect(src).toContain('bindPadronBackgroundAppLifecycle');
   });
 
   it('service worker precachea assets Tesseract offline', () => {

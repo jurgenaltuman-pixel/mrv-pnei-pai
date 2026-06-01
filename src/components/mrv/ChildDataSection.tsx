@@ -30,7 +30,7 @@ import {
 } from '@/lib/padron-search-status';
 import type { CedulaOcrFields, CedulaOcrTarget } from '@/lib/cedula-ocr-parse';
 
-const CedulaOcrButtons = lazy(() => import('@/components/mrv/CedulaOcrButtons'));
+const CedulaOcrMinimized = lazy(() => import('@/components/mrv/CedulaOcrMinimized'));
 
 function personaToClipMeta(p: PersonaBase, tipoFallback: string): ClipNinoMeta {
   return {
@@ -473,6 +473,13 @@ export default function ChildDataSection(props: Props) {
       </div>
     ) : null;
 
+  const showCedulaScan =
+    isNativeApp() &&
+    !props.visitaSinDatosNino &&
+    (padronSearchStatus.kind === 'not_found' ||
+      padronSearchStatus.kind === 'error' ||
+      mostrarAltaPadron);
+
   const bannerText = padronSearchBannerText(padronSearchStatus);
   const bannerTone = padronSearchBannerTone(padronSearchStatus);
   const bannerClass =
@@ -750,9 +757,119 @@ export default function ChildDataSection(props: Props) {
           </div>
         )}
 
-        {!props.visitaSinDatosNino && isNativeApp() && (
+        {!props.visitaSinDatosNino && (
+          <div className="rounded-lg border border-border bg-card p-3 space-y-3">
+            <p className="text-xs font-bold text-foreground">Datos del niño/a (carga manual)</p>
+            <p className="text-[10px] text-muted-foreground -mt-2">
+              Completá siempre estos campos. Si no aparece en el padrón, buscá por documento y luego cargá acá.
+            </p>
+            <div>
+              <label className="field-label flex items-center gap-1">
+                Nombre completo del niño/a <span className="text-destructive font-bold">*</span>
+              </label>
+              <input
+                type="text"
+                value={props.nombre}
+                onChange={(e) => props.setNombre(upperText(e.target.value))}
+                className="w-full h-11 px-3 rounded-lg border bg-background text-sm mrv-field-text"
+                placeholder="Apellidos y nombres según documento"
+                title="Nombre completo"
+              />
+            </div>
+            <div>
+              <label className="field-label flex items-center gap-1">
+                Cédula de Identidad <span className="text-destructive font-bold">*</span>
+              </label>
+              <input
+                value={props.documento}
+                onChange={(e) => handleDocChange(e.target.value)}
+                className={`w-full h-10 px-3 rounded-lg border bg-background text-sm font-mono ${
+                  props.sinDocumento && !codigoTmpValido ? 'border-destructive' : ''
+                }`}
+                placeholder={props.sinDocumento ? 'Iniciales + DDMMAAAA (ej. MEG15032015)' : 'Número de CI'}
+                inputMode={props.sinDocumento ? 'text' : 'numeric'}
+              />
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={props.sinDocumento}
+                    onChange={(e) => props.setSinDocumento(e.target.checked)}
+                  />
+                  Sin CI — iniciales + fecha de nacimiento
+                </label>
+                {props.sinDocumento && (
+                  <button
+                    type="button"
+                    onClick={props.generarDocumentoTemporal}
+                    className="h-8 px-2 rounded-md bg-secondary text-xs font-semibold"
+                  >
+                    Generar código
+                  </button>
+                )}
+              </div>
+            </div>
+            <div>
+              <label className="field-label flex items-center gap-1">
+                Fecha de Nacimiento <span className="text-destructive font-bold">*</span>
+              </label>
+              <FechaInputPy value={props.fechaNacimiento} onChange={props.setFechaNacimiento} />
+            </div>
+            {props.fechaNacimiento && (
+              <div
+                className={`px-3 py-2 rounded-lg text-sm font-semibold flex items-center gap-1.5 ${
+                  props.edadValida ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'
+                }`}
+              >
+                {props.edadValida ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />} {props.edadTexto}
+              </div>
+            )}
+            <div>
+              <label className="field-label flex items-center gap-1">
+                Sexo <span className="text-destructive font-bold">*</span>
+              </label>
+              <div className="flex gap-2">
+                {['M', 'F'].map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => props.setSexo(s)}
+                    className={`flex-1 h-10 rounded-lg font-semibold text-sm border transition-colors ${
+                      props.sexo === s
+                        ? 'bg-primary text-primary-foreground border-primary shadow-md ring-2 ring-primary/40'
+                        : 'bg-secondary text-secondary-foreground border-border hover:bg-muted'
+                    }`}
+                    aria-pressed={props.sexo === s}
+                  >
+                    {s === 'M' ? 'Masculino' : 'Femenino'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="rounded-lg border p-3 space-y-2 bg-muted/30">
+              <p className="text-xs font-bold uppercase text-muted-foreground flex items-center gap-1">
+                <User className="w-3.5 h-3.5" /> Madre (RVe) <span className="text-destructive">*</span>
+              </p>
+              <input
+                value={props.documentoMadre}
+                onChange={(e) => props.setDocumentoMadre?.(e.target.value.replace(/\D/g, ''))}
+                className="w-full h-9 px-2 rounded-lg border bg-background text-sm"
+                placeholder="CI de la madre (6–8 dígitos) *"
+                inputMode="numeric"
+              />
+              <input
+                value={props.nombreMadre}
+                onChange={(e) => props.setNombreMadre?.(e.target.value)}
+                className="w-full h-9 px-2 rounded-lg border bg-background text-sm"
+                placeholder="Nombre completo de la madre *"
+              />
+            </div>
+          </div>
+        )}
+
+        {showCedulaScan && (
           <Suspense fallback={null}>
-            <CedulaOcrButtons
+            <CedulaOcrMinimized
               disabled={searching}
               onResult={aplicarOcr}
               onError={(msg) =>
@@ -779,122 +896,6 @@ export default function ChildDataSection(props: Props) {
 
         {!props.visitaSinDatosNino && props.documento.length >= 4 && (
           <PadronSprHistorial historial={historialSpr} loading={historialLoading} />
-        )}
-
-        {!props.visitaSinDatosNino && (
-          <div>
-            <label className="field-label flex items-center gap-1">
-              Nombre completo del niño/a <span className="text-destructive font-bold">*</span>
-            </label>
-            <input
-              type="text"
-              value={props.nombre}
-              onChange={(e) => props.setNombre(upperText(e.target.value))}
-              className="w-full h-11 px-3 rounded-lg border bg-background text-sm mrv-field-text"
-              placeholder="Apellidos y nombres según documento"
-              title="Nombre completo"
-            />
-          </div>
-        )}
-
-        <div>
-          <label className="field-label flex items-center gap-1">
-            Cédula de Identidad {!props.visitaSinDatosNino && <span className="text-destructive font-bold">*</span>}
-          </label>
-          <input
-            value={props.documento}
-            onChange={(e) => handleDocChange(e.target.value)}
-            className={`w-full h-10 px-3 rounded-lg border bg-background text-sm font-mono ${
-              props.sinDocumento && !codigoTmpValido ? 'border-destructive' : ''
-            }`}
-            placeholder={props.sinDocumento ? 'Iniciales + DDMMAAAA (ej. MEG15032015)' : 'Número de CI'}
-            inputMode={props.sinDocumento ? 'text' : 'numeric'}
-          />
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
-              <input
-                type="checkbox"
-                checked={props.sinDocumento}
-                onChange={(e) => props.setSinDocumento(e.target.checked)}
-              />
-              Sin CI — iniciales + fecha de nacimiento
-            </label>
-            {props.sinDocumento && (
-              <button
-                type="button"
-                onClick={props.generarDocumentoTemporal}
-                className="h-8 px-2 rounded-md bg-secondary text-xs font-semibold"
-              >
-                Generar código
-              </button>
-            )}
-          </div>
-          {props.sinDocumento && (
-            <p className="text-[10px] text-muted-foreground mt-1">
-              Código: iniciales del nombre + fecha de nacimiento (DDMMAAAA). Complete nombre y fecha antes de generar.
-            </p>
-          )}
-        </div>
-
-        <div>
-          <label className="field-label flex items-center gap-1">
-            Fecha de Nacimiento {!props.visitaSinDatosNino && <span className="text-destructive font-bold">*</span>}
-          </label>
-          <FechaInputPy value={props.fechaNacimiento} onChange={props.setFechaNacimiento} />
-        </div>
-
-        {props.fechaNacimiento && (
-          <div
-            className={`px-3 py-2 rounded-lg text-sm font-semibold flex items-center gap-1.5 ${
-              props.edadValida ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'
-            }`}
-          >
-            {props.edadValida ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />} {props.edadTexto}
-          </div>
-        )}
-
-        <div>
-          <label className="field-label flex items-center gap-1">
-            Sexo {!props.visitaSinDatosNino && <span className="text-destructive font-bold">*</span>}
-          </label>
-          <div className="flex gap-2">
-            {['M', 'F'].map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => props.setSexo(s)}
-                className={`flex-1 h-10 rounded-lg font-semibold text-sm border transition-colors ${
-                  props.sexo === s
-                    ? 'bg-primary text-primary-foreground border-primary shadow-md ring-2 ring-primary/40'
-                    : 'bg-secondary text-secondary-foreground border-border hover:bg-muted'
-                }`}
-                aria-pressed={props.sexo === s}
-              >
-                {s === 'M' ? 'Masculino' : 'Femenino'}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {!props.visitaSinDatosNino && (
-          <div className="rounded-lg border p-3 space-y-2 bg-muted/30">
-            <p className="text-xs font-bold uppercase text-muted-foreground flex items-center gap-1">
-              <User className="w-3.5 h-3.5" /> Madre (RVe) <span className="text-destructive">*</span>
-            </p>
-            <input
-              value={props.documentoMadre}
-              onChange={(e) => props.setDocumentoMadre?.(e.target.value.replace(/\D/g, ''))}
-              className="w-full h-9 px-2 rounded-lg border bg-background text-sm"
-              placeholder="CI de la madre (6–8 dígitos) *"
-              inputMode="numeric"
-            />
-            <input
-              value={props.nombreMadre}
-              onChange={(e) => props.setNombreMadre?.(e.target.value)}
-              className="w-full h-9 px-2 rounded-lg border bg-background text-sm"
-              placeholder="Nombre completo de la madre *"
-            />
-          </div>
         )}
 
         {panelClipOpcional}

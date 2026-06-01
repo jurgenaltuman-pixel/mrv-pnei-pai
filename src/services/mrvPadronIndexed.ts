@@ -196,6 +196,39 @@ export const mrvPadronIndexed = {
       await this.clearAll();
     }
     const pageSize = isNativeApp() ? 2000 : 1000;
+    const pageRetries = isNativeApp() ? 4 : 2;
+
+    const fetchOnePage = async (
+      from: number
+    ): Promise<{ data: Record<string, unknown>[] | null; error?: string }> => {
+      let lastErr: string | undefined;
+      for (let attempt = 0; attempt < pageRetries; attempt += 1) {
+        if (USE_MRV_API && !USE_SUPABASE_PADRON) {
+          const { data: apiRes, error } = await fetchPadronPage(from, pageSize);
+          if (!error) {
+            return { data: (apiRes?.data || []) as Record<string, unknown>[] };
+          }
+          lastErr = error;
+        } else {
+          const to = from + pageSize - 1;
+          const res = await supabase
+            .from('base_personas')
+            .select(
+              'id, nombre, tipo_documento, documento, fecha_nacimiento, sexo, region_sanitaria, distrito, servicio_salud, documento_madre, nombre_madre'
+            )
+            .order('id', { ascending: true })
+            .range(from, to);
+          if (!res.error) {
+            return { data: res.data as Record<string, unknown>[] | null };
+          }
+          lastErr = res.error?.message;
+        }
+        if (attempt < pageRetries - 1) {
+          await sleep(400 * (attempt + 1));
+        }
+      }
+      return { data: null, error: lastErr || 'Error de red al descargar lote' };
+    };
     let imported = canResume && prior ? prior.rowCount : 0;
     let page =
       canResume && prior
@@ -246,22 +279,7 @@ export const mrvPadronIndexed = {
     try {
       while (true) {
         const from = page * pageSize;
-        let data: Record<string, unknown>[] | null = null;
-        let fetchError: string | undefined;
-        if (USE_MRV_API && !USE_SUPABASE_PADRON) {
-          const { data: apiRes, error } = await fetchPadronPage(from, pageSize);
-          fetchError = error;
-          data = (apiRes?.data || []) as Record<string, unknown>[];
-        } else {
-          const to = from + pageSize - 1;
-          const res = await supabase
-            .from('base_personas')
-            .select('id, nombre, tipo_documento, documento, fecha_nacimiento, sexo, region_sanitaria, distrito, servicio_salud, documento_madre, nombre_madre')
-            .order('id', { ascending: true })
-            .range(from, to);
-          fetchError = res.error?.message;
-          data = res.data as Record<string, unknown>[] | null;
-        }
+        const { data, error: fetchError } = await fetchOnePage(from);
         if (fetchError) {
           await this.setMeta({ ...metaBase, rowCount: imported, complete: false, resumePage: page });
           return { imported, error: fetchError, resumed: canResume };

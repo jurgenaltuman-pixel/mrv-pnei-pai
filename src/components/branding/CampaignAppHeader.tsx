@@ -18,6 +18,8 @@ export interface CampaignAppHeaderProps {
     servicio: string;
   };
   pwaInstall?: { canInstall: boolean; onInstall: () => void | Promise<void> };
+  /** APK: % descarga padrón en segundo plano (null = oculto). */
+  padronDownloadPercent?: number | null;
 }
 
 const LOGO_SRC = `${import.meta.env.BASE_URL}logo-mrv-oficial.png`.replace(/\/{2,}/g, '/');
@@ -59,6 +61,7 @@ export function CampaignAppHeader({
   onLogout,
   asignacion,
   pwaInstall,
+  padronDownloadPercent = null,
 }: CampaignAppHeaderProps) {
   const tieneAsignacion = Boolean(
     asignacion?.region?.trim() || asignacion?.distrito?.trim() || asignacion?.servicio?.trim()
@@ -103,6 +106,11 @@ export function CampaignAppHeader({
                 </span>
               </div>
             ) : null}
+            {padronDownloadPercent != null && (
+              <p className="text-[9px] font-bold text-sky-800 dark:text-sky-200 tabular-nums">
+                Padrón offline {padronDownloadPercent}% · segundo plano
+              </p>
+            )}
           </div>
 
           <div className="flex flex-col items-end gap-1.5 shrink-0 row-span-2 sm:row-span-1 self-center">

@@ -42,6 +42,12 @@ import {
 } from '@/lib/visit-session-storage';
 import { CampaignAppHeader } from '@/components/branding/CampaignAppHeader';
 import { PadronOfflineBanner } from '@/components/mrv/PadronOfflineBanner';
+import { isNativeApp } from '@/lib/capacitor-platform';
+import {
+  bindPadronBackgroundAppLifecycle,
+  maybeAutoStartPadronBackgroundDownload,
+  subscribePadronBackgroundDownload,
+} from '@/services/padron-background-download';
 import FridayReminderBanner from '@/components/mrv/FridayReminderBanner';
 import { useFridayReminder } from '@/hooks/useFridayReminder';
 import ProfileScopeEditor from '@/components/mrv/ProfileScopeEditor';
@@ -143,6 +149,7 @@ export default function MainApp() {
   const [resumeRoundId, setResumeRoundId] = useState<string | null>(null);
   const [roundsDockKey, setRoundsDockKey] = useState(0);
   const [activeRoundId, setActiveRoundId] = useState<string | null>(null);
+  const [padronBgPct, setPadronBgPct] = useState<number | null>(null);
   const padronLookupRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
@@ -162,6 +169,23 @@ export default function MainApp() {
     const id = window.setInterval(() => void refreshPending(), 45_000);
     return () => window.clearInterval(id);
   }, [refreshPending, isOnline]);
+
+  useEffect(() => {
+    if (!isNativeApp() || !user) return;
+    return bindPadronBackgroundAppLifecycle();
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!isNativeApp() || !user || !isOnline) return;
+    void maybeAutoStartPadronBackgroundDownload(isOnline);
+  }, [user?.id, isOnline]);
+
+  useEffect(() => {
+    if (!isNativeApp()) return;
+    return subscribePadronBackgroundDownload((s) => {
+      setPadronBgPct(s.active && s.progress?.percent != null ? s.progress.percent : null);
+    });
+  }, []);
 
   const runSyncAll = useCallback(
     async (silent = false) => {
@@ -1190,6 +1214,7 @@ export default function MainApp() {
             : undefined
         }
         pwaInstall={canInstall ? { canInstall: true, onInstall: install } : undefined}
+        padronDownloadPercent={padronBgPct}
       />
       <PadronOfflineBanner isOnline={isOnline} />
       {fridayReminder.visible && fridayReminder.alertas && (
