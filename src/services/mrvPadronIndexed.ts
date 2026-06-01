@@ -4,6 +4,7 @@
  */
 import { supabase } from '@/integrations/supabase/client';
 import { USE_MRV_API, USE_SUPABASE_PADRON } from '@/lib/api-config';
+import { isNativeApp } from '@/lib/capacitor-platform';
 import { extractSexoFromPadronRow } from '@/lib/persona-sexo';
 import { padronDownloadPageDelayMs, padronDownloadStartDelayMs, sleep } from '@/lib/padron-download-delay';
 import { fetchPadronCount, fetchPadronPage } from '@/services/mrvBackend';
@@ -20,6 +21,8 @@ export interface PadronMeta {
   updatedAt: number;
   /** true cuando la última descarga terminó sin error de red */
   complete: boolean;
+  /** Total esperado según servidor al iniciar descarga. */
+  expectedTotal?: number | null;
   /** Página siguiente al reanudar (0 = inicio). */
   resumePage?: number;
 }
@@ -99,7 +102,9 @@ export const mrvPadronIndexed = {
 
   async isReady(): Promise<boolean> {
     const m = await this.getMeta();
-    return Boolean(m?.complete && m.rowCount > 0);
+    if (!m?.complete || m.rowCount <= 0) return false;
+    if (m.expectedTotal != null && m.rowCount < m.expectedTotal) return false;
+    return true;
   },
 
   /** Hay filas en IndexedDB (descarga completa o parcial). */
@@ -149,7 +154,8 @@ export const mrvPadronIndexed = {
   },
 
   async setMeta(
-    partial: Partial<Omit<PadronMeta, 'key'>> & Pick<PadronMeta, 'rowCount' | 'complete'>
+    partial: Partial<Omit<PadronMeta, 'key'>> &
+      Pick<PadronMeta, 'rowCount' | 'complete'> & { expectedTotal?: number | null }
   ): Promise<void> {
     const db = await openDB();
     const prev = await this.getMeta();
@@ -161,6 +167,7 @@ export const mrvPadronIndexed = {
       rowCount: partial.rowCount,
       updatedAt: Date.now(),
       complete: partial.complete,
+      expectedTotal: partial.expectedTotal ?? prev?.expectedTotal ?? null,
       resumePage: partial.resumePage ?? (partial.complete ? undefined : prev?.resumePage),
     };
     await new Promise<void>((resolve, reject) => {
@@ -176,7 +183,8 @@ export const mrvPadronIndexed = {
   ): Promise<{ imported: number; error?: string; resumed?: boolean; skipped?: boolean }> {
     const prior = await this.getMeta();
     if (prior?.complete && prior.rowCount > 0 && !opts?.force) {
-      return { imported: prior.rowCount, skipped: true };
+      const expectedOk = prior.expectedTotal == null || prior.rowCount >= prior.expectedTotal;
+      if (expectedOk) return { imported: prior.rowCount, skipped: true };
     }
 
     const canResume = Boolean(
@@ -187,7 +195,7 @@ export const mrvPadronIndexed = {
     } else if (!prior?.rowCount || opts?.force) {
       await this.clearAll();
     }
-    const pageSize = 800;
+    const pageSize = isNativeApp() ? 2000 : 1000;
     let imported = canResume && prior ? prior.rowCount : 0;
     let page =
       canResume && prior
@@ -229,9 +237,11 @@ export const mrvPadronIndexed = {
     await sleep(padronDownloadStartDelayMs());
 
     if (totalRows === 0) {
-      await this.setMeta({ rowCount: 0, complete: true });
+      await this.setMeta({ rowCount: 0, complete: true, expectedTotal: 0 });
       return { imported: 0 };
     }
+
+    const metaBase = { expectedTotal: totalRows };
 
     try {
       while (true) {
@@ -253,10 +263,20 @@ export const mrvPadronIndexed = {
           data = res.data as Record<string, unknown>[] | null;
         }
         if (fetchError) {
-          await this.setMeta({ rowCount: imported, complete: false, resumePage: page });
+          await this.setMeta({ ...metaBase, rowCount: imported, complete: false, resumePage: page });
           return { imported, error: fetchError, resumed: canResume };
         }
-        if (!data?.length) break;
+        if (!data?.length) {
+          if (totalRows != null && imported < totalRows) {
+            await this.setMeta({ ...metaBase, rowCount: imported, complete: false, resumePage: page });
+            return {
+              imported,
+              error: `Respuesta vacía (${imported.toLocaleString('es-PY')}/${totalRows.toLocaleString('es-PY')})`,
+              resumed: canResume,
+            };
+          }
+          break;
+        }
         bytesApprox += textEncoder.encode(JSON.stringify(data)).length;
         const batch: PadronRow[] = (data as Record<string, unknown>[]).map((raw) => ({
           id: stableId(raw as { id?: string; documento?: string; tipo_documento?: string }),
@@ -274,17 +294,37 @@ export const mrvPadronIndexed = {
         await this.putBatch(batch);
         imported += batch.length;
         page += 1;
-        await this.setMeta({ rowCount: imported, complete: false, resumePage: page });
+        await this.setMeta({ ...metaBase, rowCount: imported, complete: false, resumePage: page });
         emit();
+        if (totalRows != null && imported >= totalRows) break;
         if (batch.length < pageSize) break;
         if (page > 5000) break;
         await sleep(padronDownloadPageDelayMs());
       }
-      await this.setMeta({ rowCount: imported, complete: true, resumePage: undefined });
+      if (totalRows != null && imported < totalRows) {
+        await this.setMeta({ ...metaBase, rowCount: imported, complete: false, resumePage: page });
+        return {
+          imported,
+          error: `Descarga incompleta (${imported.toLocaleString('es-PY')}/${totalRows.toLocaleString('es-PY')})`,
+          resumed: canResume,
+        };
+      }
+      await this.setMeta({
+        ...metaBase,
+        rowCount: imported,
+        complete: true,
+        expectedTotal: totalRows ?? imported,
+        resumePage: undefined,
+      });
       return { imported, resumed: canResume };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      await this.setMeta({ rowCount: imported, complete: false, resumePage: page });
+      await this.setMeta({
+        rowCount: imported,
+        complete: false,
+        resumePage: page,
+        expectedTotal: totalRows ?? prior?.expectedTotal ?? null,
+      });
       return { imported, error: msg, resumed: canResume };
     }
   },

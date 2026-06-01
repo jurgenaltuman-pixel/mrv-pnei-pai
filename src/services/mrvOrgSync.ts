@@ -82,6 +82,9 @@ export async function syncOrgStructureOffline(): Promise<OrgSyncResult> {
 
   const normalized = applyOrgData(regiones, distritos, servicios, barrios);
   await mrvAppCache.saveOrgSnapshot(normalized);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('mrv-org-updated'));
+  }
   const bytesApprox = encoder.encode(JSON.stringify(normalized)).length;
   return {
     regiones: normalized.regiones.length,

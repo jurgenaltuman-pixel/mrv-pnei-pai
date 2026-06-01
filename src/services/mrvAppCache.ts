@@ -83,6 +83,11 @@ const REG_KEY = 'registros_snapshot_v1';
 const personaPrefix = 'persona_search:';
 
 export const mrvAppCache = {
+  async isOrgReady(): Promise<boolean> {
+    const snap = await this.getOrgSnapshot();
+    return Boolean(snap?.distritos?.length && snap?.regiones?.length);
+  },
+
   async saveOrgSnapshot(snapshot: Omit<OrgStructureSnapshot, 'savedAt'>): Promise<void> {
     const payload: OrgStructureSnapshot = {
       ...snapshot,

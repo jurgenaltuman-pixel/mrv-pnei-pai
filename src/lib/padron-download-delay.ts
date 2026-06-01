@@ -7,12 +7,11 @@ export function padronDownloadStartDelayMs(): number {
   return Math.floor(Math.random() * Math.max(0, maxSec) * 1000);
 }
 
-/** Pausa entre páginas: más corta en APK para descarga fluida. */
+/** Pausa entre páginas: mínima en APK para descarga rápida. */
 export function padronDownloadPageDelayMs(): number {
-  const base = isNativeApp()
-    ? Number(import.meta.env.VITE_PADRON_PAGE_DELAY_MS_NATIVE || 40)
-    : Number(import.meta.env.VITE_PADRON_PAGE_DELAY_MS || 280);
-  const jitter = isNativeApp() ? Math.floor(Math.random() * 30) : Math.floor(Math.random() * 220);
+  if (isNativeApp()) return 0;
+  const base = Number(import.meta.env.VITE_PADRON_PAGE_DELAY_MS || 280);
+  const jitter = Math.floor(Math.random() * 220);
   return base + jitter;
 }
 
