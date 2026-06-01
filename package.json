@@ -1,7 +1,7 @@
 {
   "name": "vite_react_shadcn_ts",
   "private": true,
-  "version": "2.6.24",
+  "version": "2.6.25",
   "description": "M R V — PNEI y PAI — MSPBS · registro nominal en terreno (soporte offline)",
   "author": "MSPBS — PNEI / PAI",
   "type": "module",
@@ -9,6 +9,7 @@
   "homepage": "./",
   "scripts": {
     "dev": "vite",
+    "prebuild": "node scripts/prepare-tesseract-assets.mjs",
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
@@ -153,6 +154,7 @@
     "sonner": "^1.7.4",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
+    "tesseract.js": "^5.1.1",
     "vaul": "^0.9.9",
     "xlsx": "0.18.5",
     "zod": "^3.25.76"

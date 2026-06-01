@@ -12,6 +12,7 @@ import { resolveSexoPersona } from '@/lib/persona-sexo';
 import { resolveFechaNacimientoPersona } from '@/lib/persona-fecha';
 import PadronSprHistorial from '@/components/mrv/PadronSprHistorial';
 import FechaInputPy from '@/components/mrv/FechaInputPy';
+import CedulaOcrButtons from '@/components/mrv/CedulaOcrButtons';
 import { useToast } from '@/hooks/use-toast';
 import RegistroClipAdjuntosSection from '@/components/mrv/RegistroClipAdjuntos';
 import {
@@ -27,6 +28,7 @@ import {
   padronSearchBannerTone,
   type PadronSearchStatus,
 } from '@/lib/padron-search-status';
+import type { CedulaOcrFields, CedulaOcrTarget } from '@/lib/cedula-ocr-parse';
 
 function personaToClipMeta(p: PersonaBase, tipoFallback: string): ClipNinoMeta {
   return {
@@ -380,6 +382,49 @@ export default function ChildDataSection(props: Props) {
 
   const codigoTmpValido = !props.sinDocumento || validarFormatoCodigoTemporal(props.documento);
 
+  const aplicarOcr = useCallback(
+    (target: CedulaOcrTarget, fields: CedulaOcrFields) => {
+      if (target === 'nino') {
+        if (fields.documento) {
+          props.setDocumento(fields.documento);
+          setDocBusqueda(fields.documento);
+          props.setSinDocumento(false);
+        }
+        if (fields.nombre) props.setNombre(upperText(fields.nombre));
+        if (fields.fechaNacimiento) props.setFechaNacimiento(fields.fechaNacimiento);
+        if (fields.sexo) props.setSexo(fields.sexo);
+        if (fields.documentoMadre && props.setDocumentoMadre) {
+          props.setDocumentoMadre(fields.documentoMadre);
+        }
+      } else {
+        if (fields.documentoMadre && props.setDocumentoMadre) {
+          props.setDocumentoMadre(fields.documentoMadre);
+        }
+        if (fields.nombre && props.setNombreMadre) {
+          props.setNombreMadre(upperText(fields.nombre));
+        }
+      }
+      const hint = [
+        target === 'nino' ? fields.documento : fields.documentoMadre,
+        fields.nombre,
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      toast({
+        title: 'Cédula leída (offline)',
+        description: hint || 'Revisá y corregí los campos si hace falta.',
+      });
+      if (fields.warnings.length) {
+        toast({
+          title: 'Completá o corregí',
+          description: fields.warnings.slice(0, 2).join(' '),
+          variant: 'destructive',
+        });
+      }
+    },
+    [props, toast]
+  );
+
   const listaSugerencias =
     sugerencias.length > 0 || searching ? (
       <div className="mt-2 bg-card border rounded-lg shadow-lg max-h-44 overflow-y-auto z-20 relative">
@@ -700,6 +745,16 @@ export default function ChildDataSection(props: Props) {
               {listaSugerencias}
             </div>
           </div>
+        )}
+
+        {!props.visitaSinDatosNino && (
+          <CedulaOcrButtons
+            disabled={searching}
+            onResult={aplicarOcr}
+            onError={(msg) =>
+              toast({ title: 'No se pudo leer la cédula', description: msg, variant: 'destructive' })
+            }
+          />
         )}
 
         {!props.visitaSinDatosNino && mostrarAltaPadron && (

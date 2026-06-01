@@ -3,7 +3,7 @@
 declare const self: ServiceWorkerGlobalScope;
 
 /** Bump para forzar activate y limpiar caches viejas. */
-const CACHE_NAME = 'mrv-v37-web-offline';
+const CACHE_NAME = 'mrv-v38-web-offline';
 
 const URLS_TO_CACHE = [
   '/',
@@ -20,6 +20,10 @@ const URLS_TO_CACHE = [
   '/icon-192.png',
   '/icon-512.png',
   '/favicon.png',
+  '/tesseract/worker.min.js',
+  '/tesseract/tesseract-core-lstm.wasm.js',
+  '/tesseract/tesseract-core-lstm.wasm',
+  '/tesseract/spa.traineddata.gz',
 ];
 
 const PRIVATE_PATHS = ['/auth/', '/profiles/', '/user_roles/', '/admin/', '/registros_vacunacion'];
