@@ -1,4 +1,4 @@
-import type { CasaMonitoreo, NinoCasa, RoundMonitoring } from '@/types/round-monitoring';
+import type { CasaEstadoCode, CasaMonitoreo, NinoCasa, RoundMonitoring } from '@/types/round-monitoring';
 import { aplicarMetaFija } from '@/lib/round-meta';
 
 function mergeNino(a: NinoCasa, b: NinoCasa): NinoCasa {
@@ -19,6 +19,31 @@ function mergeNinos(a: NinoCasa[], b: NinoCasa[]): NinoCasa[] {
   return [...map.values()];
 }
 
+/** Evita que un borrador viejo en la nube convierta E→N/F/R sin edición real. */
+function mergeEstadoGuardada(
+  older: CasaMonitoreo,
+  newer: CasaMonitoreo,
+  merged: CasaEstadoCode | null
+): CasaEstadoCode | null {
+  if (!older.estado || !newer.estado || older.estado === newer.estado) return merged;
+  if (older.estado !== 'E') return merged;
+
+  const olderKids = older.ninos?.length ?? 0;
+  const newerKids = newer.ninos?.length ?? 0;
+  const newerIsDowngrade = newer.estado === 'N' || newer.estado === 'F' || newer.estado === 'R';
+
+  if (!newerIsDowngrade) return merged;
+
+  // Borrador remoto sin niños que pisa una E con datos → mantener E
+  if (olderKids > 0 && newerKids === 0) return 'E';
+
+  // Re-edición explícita: más de 2 min después y con datos en la visita nueva
+  const delta = (newer.guardadaAt ?? 0) - (older.guardadaAt ?? 0);
+  if (delta >= 120_000 && (newerKids > 0 || newer.latitud != null)) return merged;
+
+  return 'E';
+}
+
 function mergeCasa(a: CasaMonitoreo, b: CasaMonitoreo): CasaMonitoreo {
   if (!b.guardada && a.guardada) return a;
   if (!a.guardada && b.guardada) return b;
@@ -26,9 +51,14 @@ function mergeCasa(a: CasaMonitoreo, b: CasaMonitoreo): CasaMonitoreo {
 
   const aAt = a.guardadaAt ?? 0;
   const bAt = b.guardadaAt ?? 0;
-  const base = bAt >= aAt ? { ...a, ...b } : { ...b, ...a };
+  const newer = bAt >= aAt ? b : a;
+  const older = bAt >= aAt ? a : b;
+  const base = { ...older, ...newer };
+  const estado = mergeEstadoGuardada(older, newer, base.estado ?? null);
+
   return {
     ...base,
+    estado,
     ninos: mergeNinos(a.ninos || [], b.ninos || []),
   };
 }

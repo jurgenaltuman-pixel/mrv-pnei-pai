@@ -356,9 +356,8 @@ export default function RoundMonitoringFlow({
             return prev;
           }
         }
-        return remoto.updatedAt >= prev.updatedAt
-          ? mergeRoundMonitoring(prev, remoto)
-          : mergeRoundMonitoring(remoto, prev);
+        // Siempre priorizar lo ya cargado en pantalla; la nube solo complementa.
+        return mergeRoundMonitoring(prev, remoto);
       });
     };
     const id = window.setInterval(() => void tick(), 12_000);

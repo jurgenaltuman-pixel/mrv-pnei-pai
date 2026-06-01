@@ -18,14 +18,30 @@ function mergeNinos(a, b) {
   return [...map.values()];
 }
 
+function mergeEstadoGuardada(older, newer, merged) {
+  if (!older.estado || !newer.estado || older.estado === newer.estado) return merged;
+  if (older.estado !== 'E') return merged;
+  const olderKids = older.ninos?.length ?? 0;
+  const newerKids = newer.ninos?.length ?? 0;
+  const newerIsDowngrade = newer.estado === 'N' || newer.estado === 'F' || newer.estado === 'R';
+  if (!newerIsDowngrade) return merged;
+  if (olderKids > 0 && newerKids === 0) return 'E';
+  const delta = (newer.guardadaAt ?? 0) - (older.guardadaAt ?? 0);
+  if (delta >= 120_000 && (newerKids > 0 || newer.latitud != null)) return merged;
+  return 'E';
+}
+
 function mergeCasa(a, b) {
   if (!b.guardada && a.guardada) return a;
   if (!a.guardada && b.guardada) return b;
   if (!a.guardada && !b.guardada) return a.numero <= b.numero ? a : b;
   const aAt = a.guardadaAt ?? 0;
   const bAt = b.guardadaAt ?? 0;
-  const base = bAt >= aAt ? { ...a, ...b } : { ...b, ...a };
-  return { ...base, ninos: mergeNinos(a.ninos, b.ninos) };
+  const newer = bAt >= aAt ? b : a;
+  const older = bAt >= aAt ? a : b;
+  const base = { ...older, ...newer };
+  const estado = mergeEstadoGuardada(older, newer, base.estado ?? null);
+  return { ...base, estado, ninos: mergeNinos(a.ninos, b.ninos) };
 }
 
 export function mergeRoundPayload(local, remote) {
@@ -69,7 +85,9 @@ export function mergeRoundPayload(local, remote) {
     totalCasas: META_EFECTIVAS,
     fase: efectivas < META_EFECTIVAS && fase === 'summary' ? 'croquis' : fase,
     completedAt:
-      efectivas < META_EFECTIVAS && (local?.completedAt || remote?.completedAt) ? null : local?.completedAt ?? remote?.completedAt,
+      efectivas < META_EFECTIVAS && (local?.completedAt || remote?.completedAt)
+        ? null
+        : local?.completedAt ?? remote?.completedAt,
     updatedAt: Math.max(local?.updatedAt || 0, remote?.updatedAt || 0),
     createdAt: Math.min(local?.createdAt || 0, remote?.createdAt || 0) || local?.createdAt,
   };
