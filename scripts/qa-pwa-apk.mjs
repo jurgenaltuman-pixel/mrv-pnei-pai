@@ -45,6 +45,12 @@ if (!fs.existsSync(dist)) {
     if (fs.existsSync(p)) ok(`dist-vite/${f}`);
     else fail(`dist-vite/${f}`);
   }
+  const tess = path.join(dist, 'tesseract', 'spa.traineddata.gz');
+  if (fs.existsSync(tess) && fs.statSync(tess).size > 100_000) {
+    ok('dist-vite/tesseract/spa.traineddata.gz');
+  } else {
+    fail('dist-vite/tesseract/spa.traineddata.gz inválido o ausente');
+  }
   const assetsDir = path.join(dist, 'assets');
   if (fs.existsSync(assetsDir)) {
     const js = fs.readdirSync(assetsDir).filter((n) => n.startsWith('App-') && n.endsWith('.js'));
@@ -68,11 +74,11 @@ if (idx.includes('manifest') || idx.includes('theme-color')) ok('index.html PWA 
 else fail('index.html sin meta PWA');
 
 const viteCfg = fs.readFileSync(path.join(root, 'vite.config.ts'), 'utf8');
-  if (viteCfg.includes('dist-vite')) ok('vite outDir dist-vite');
+if (viteCfg.includes('dist-vite')) ok('vite outDir dist-vite');
 
 const swSrc = fs.readFileSync(path.join(root, 'src/service-worker.ts'), 'utf8');
-if (swSrc.includes('mrv-v37-web-offline')) ok('service-worker cache v37');
-else fail('service-worker debe usar cache mrv-v37-web-offline');
+if (swSrc.includes('mrv-v38-web-offline')) ok('service-worker cache v38');
+else fail('service-worker debe usar cache mrv-v38-web-offline');
 
 const appSrc = fs.readFileSync(path.join(root, 'src/App.tsx'), 'utf8');
 if (appSrc.includes('registerServiceWorker')) ok('App registra service worker (web)');

@@ -6,6 +6,7 @@ import type { ClipNinoMeta, RegistroClipAdjuntos } from '@/lib/registro-clip-adj
 import { clipStorageKey } from '@/lib/registro-clip-adjuntos';
 import { isPendingDriveUrl, pendingDriveUrl } from '@/lib/pending-drive-url';
 import { flushPendingDriveForClip, queueDriveImage } from '@/services/driveAdjuntosOfflineQueue';
+import { puedeGuardarClipDrive } from '@/lib/clip-upload-eligibility';
 import { useToast } from '@/hooks/use-toast';
 
 const MAX_IMAGES = 2;
@@ -47,7 +48,7 @@ export default function RegistroClipAdjuntosSection({
   const docRef = meta.documento.trim();
   const nombreRef = meta.nombre.trim();
   const clipKey = clipStorageKey(meta.tipo, docRef);
-  const puedeSubir = docRef.length >= 4;
+  const puedeSubir = puedeGuardarClipDrive(docRef);
 
   const openPicker = (index: number, source: 'camera' | 'gallery') => {
     if (source === 'camera') cameraRefs.current[index]?.click();
