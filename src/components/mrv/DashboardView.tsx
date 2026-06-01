@@ -64,9 +64,13 @@ function KpiCard({
 
 interface DashboardViewProps {
   onResumeRound?: (round: RoundMonitoring) => void;
+  onResumeRoundByName?: (moduloLabel: string) => void;
 }
 
-export default function DashboardView({ onResumeRound }: DashboardViewProps = {}) {
+export default function DashboardView({
+  onResumeRound,
+  onResumeRoundByName,
+}: DashboardViewProps = {}) {
   const { user } = useAuth();
   const role = useRole();
   const {
@@ -394,6 +398,7 @@ export default function DashboardView({ onResumeRound }: DashboardViewProps = {}
           stats={jornadaStats}
           userId={user.id}
           onContinueRound={onResumeRound}
+          onContinueRoundByName={onResumeRoundByName}
         />
       )}
 

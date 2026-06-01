@@ -65,6 +65,7 @@ interface Props {
   userId: string;
   entrevistadorNombre?: string | null;
   resumeRoundId?: string | null;
+  resumeRoundLabel?: string | null;
   onRoundsChanged?: () => void;
   onActiveRoundChange?: (roundId: string | null) => void;
   isOnline: boolean;
@@ -99,6 +100,7 @@ export default function RoundMonitoringFlow({
   userId,
   entrevistadorNombre = null,
   resumeRoundId = null,
+  resumeRoundLabel = null,
   onRoundsChanged,
   onActiveRoundChange,
   isOnline,
@@ -163,17 +165,9 @@ export default function RoundMonitoringFlow({
     onActiveRoundChange?.(round?.id ?? null);
   }, [round?.id, onActiveRoundChange]);
 
-  useEffect(() => {
-    if (!resumeRoundId) return;
-    void (async () => {
-      await roundMonitoringStorage.syncDraftsFromServer(userId);
-      const drafts = await roundMonitoringStorage.listActiveDraftsForUser(userId);
-      let target = drafts.find((r) => r.id === resumeRoundId);
-      if (!target) {
-        const rows = await roundMonitoringStorage.listByUser(userId, 30);
-        target = rows.find((r) => r.id === resumeRoundId);
-      }
-      if (!target || rondaCompletada(target)) return;
+  const openResumedRound = useCallback(
+    async (target: RoundMonitoring, drafts: RoundMonitoring[]) => {
+      if (rondaCompletada(target)) return;
       undismissRound(userId, target.id);
       const r = aplicarMetaFija(target);
       setRound(r);
@@ -183,7 +177,7 @@ export default function RoundMonitoringFlow({
       setRecoverableRounds(drafts.filter((x) => x.id !== r.id));
       setEstadoDraft(null);
       setRondaRegistrada(r.fase === 'summary' && countCasasEfectivas(r.casas) >= r.totalCasas);
-      void roundMonitoringStorage.save(r);
+      await roundMonitoringStorage.save(r);
       onJornadaUpdate?.(setRondaActivaNombre(userId, r.moduloLabel));
       onRoundsChanged?.();
       const eff = countCasasEfectivas(r.casas);
@@ -191,21 +185,54 @@ export default function RoundMonitoringFlow({
         title: 'Ronda reanudada',
         description: `${r.moduloLabel} · ${eff}/${r.totalCasas} efectivas (E)`,
       });
+    },
+    [userId, setBarrio, applyEquipoFromRound, onRoundsChanged, onJornadaUpdate, toast]
+  );
+
+  useEffect(() => {
+    if (!resumeRoundId && !resumeRoundLabel?.trim()) return;
+    void (async () => {
+      const drafts = await roundMonitoringStorage.listActiveDraftsForUser(userId);
+      let target: RoundMonitoring | null | undefined = null;
+      if (resumeRoundId) {
+        target =
+          drafts.find((r) => r.id === resumeRoundId) ??
+          (await roundMonitoringStorage.listByUser(userId, 30)).find((r) => r.id === resumeRoundId);
+      }
+      if (!target && resumeRoundLabel?.trim()) {
+        target = await roundMonitoringStorage.findResumableForUser(userId, {
+          moduloLabel: resumeRoundLabel.trim(),
+        });
+      }
+      if (!target) {
+        toast({
+          title: 'No se encontró la ronda',
+          description: resumeRoundLabel
+            ? `No hay borrador activo para «${resumeRoundLabel}». Revisá en Monitoreo o iniciá de nuevo.`
+            : 'El borrador ya no está en este dispositivo.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      await openResumedRound(target, drafts);
     })();
-  }, [resumeRoundId, userId, setBarrio, onRoundsChanged, onJornadaUpdate, toast, applyEquipoFromRound]);
+  }, [resumeRoundId, resumeRoundLabel, userId, openResumedRound, toast]);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       setLoadingResume(true);
       try {
-        await roundMonitoringStorage.syncDraftsFromServer(userId);
         const drafts = await roundMonitoringStorage.listActiveDraftsForUser(userId);
+        const primary =
+          drafts[0] ??
+          (await roundMonitoringStorage.findResumableForUser(userId));
         if (!cancelled) {
-          setActiveDrafts(drafts);
-          const primary = drafts[0] ?? null;
+          setActiveDrafts(drafts.length ? drafts : primary ? [primary] : []);
           setSavedRound(primary);
-          setRecoverableRounds(drafts.filter((r) => r.id !== primary?.id));
+          setRecoverableRounds(
+            (drafts.length ? drafts : primary ? [primary] : []).filter((r) => r.id !== primary?.id)
+          );
         }
       } finally {
         if (!cancelled) setLoadingResume(false);

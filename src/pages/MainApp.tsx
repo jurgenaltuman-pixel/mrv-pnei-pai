@@ -147,16 +147,20 @@ export default function MainApp() {
   const [pendingDriveCount, setPendingDriveCount] = useState(0);
   const [syncingOffline, setSyncingOffline] = useState(false);
   const [resumeRoundId, setResumeRoundId] = useState<string | null>(null);
+  const [resumeRoundLabel, setResumeRoundLabel] = useState<string | null>(null);
   const [roundsDockKey, setRoundsDockKey] = useState(0);
   const [activeRoundId, setActiveRoundId] = useState<string | null>(null);
   const [padronBgPct, setPadronBgPct] = useState<number | null>(null);
   const padronLookupRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
-    if (!resumeRoundId) return;
-    const t = setTimeout(() => setResumeRoundId(null), 400);
+    if (!resumeRoundId && !resumeRoundLabel) return;
+    const t = setTimeout(() => {
+      setResumeRoundId(null);
+      setResumeRoundLabel(null);
+    }, 800);
     return () => clearTimeout(t);
-  }, [resumeRoundId]);
+  }, [resumeRoundId, resumeRoundLabel]);
 
   const refreshPending = useCallback(async () => {
     const c = await refreshPendingCounts();
@@ -240,9 +244,18 @@ export default function MainApp() {
   const [barrio, setBarrio] = useState('');
 
   const handleResumeRound = useCallback((r: RoundMonitoring) => {
+    setResumeRoundLabel(null);
     setResumeRoundId(r.id);
     setTab('registro');
     setBarrio(r.moduloLabel);
+    setRoundsDockKey((k) => k + 1);
+  }, []);
+
+  const handleResumeRoundByName = useCallback((moduloLabel: string) => {
+    setResumeRoundId(null);
+    setResumeRoundLabel(moduloLabel.trim());
+    setTab('registro');
+    setBarrio(moduloLabel.trim());
     setRoundsDockKey((k) => k + 1);
   }, []);
 
@@ -1273,6 +1286,7 @@ export default function MainApp() {
                 userId={user.id}
                 entrevistadorNombre={user.nombre || responsable || user.email}
                 resumeRoundId={resumeRoundId}
+                resumeRoundLabel={resumeRoundLabel}
                 onRoundsChanged={() => setRoundsDockKey((k) => k + 1)}
                 onActiveRoundChange={setActiveRoundId}
                 isOnline={isOnline}
@@ -1383,7 +1397,10 @@ export default function MainApp() {
 
         {tab === 'dashboard' && (
           <Suspense fallback={<PageSkeleton rows={5} />}>
-            <DashboardView onResumeRound={handleResumeRound} />
+            <DashboardView
+              onResumeRound={handleResumeRound}
+              onResumeRoundByName={handleResumeRoundByName}
+            />
           </Suspense>
         )}
         {tab === 'mapa' && (

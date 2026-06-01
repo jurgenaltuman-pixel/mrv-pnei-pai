@@ -13,7 +13,7 @@ import { casasAbiertasCerradas, type JornadaStats } from '@/lib/jornada-storage'
 import { META_CASAS_EFECTIVAS } from '@/lib/round-meta';
 import { countCasasEfectivas } from '@/lib/croquis-housing';
 import { UMBRAL_COBERTURA_APROBADO } from '@/lib/round-evaluation';
-import { rondaIncompleta, undismissRound } from '@/lib/round-resume';
+import { undismissRound } from '@/lib/round-resume';
 import RoundHistoryAccordion from '@/components/mrv/RoundHistoryAccordion';
 import { fetchMyRoundHistory } from '@/services/roundHistoryApi';
 import { roundMonitoringStorage } from '@/services/roundMonitoringStorage';
@@ -24,9 +24,16 @@ interface Props {
   stats: JornadaStats;
   userId?: string;
   onContinueRound?: (round: RoundMonitoring) => void;
+  /** Si no hay borrador en el dispositivo pero sí nombre en jornada (ej. FATIMA). */
+  onContinueRoundByName?: (moduloLabel: string) => void;
 }
 
-export default function JornadaSummary({ stats, userId, onContinueRound }: Props) {
+export default function JornadaSummary({
+  stats,
+  userId,
+  onContinueRound,
+  onContinueRoundByName,
+}: Props) {
   const [serverRounds, setServerRounds] = useState<Awaited<ReturnType<typeof fetchMyRoundHistory>>>([]);
   const [loadingRounds, setLoadingRounds] = useState(false);
   const [showRoundHistory, setShowRoundHistory] = useState(false);
@@ -40,12 +47,9 @@ export default function JornadaSummary({ stats, userId, onContinueRound }: Props
     }
     setLoadingDraft(true);
     try {
-      await roundMonitoringStorage.syncDraftsFromServer(userId);
-      const drafts = await roundMonitoringStorage.listActiveDraftsForUser(userId);
-      const pendiente =
-        drafts.find((r) => rondaIncompleta(r)) ??
-        drafts.find((r) => r.moduloLabel === stats.rondaActivaNombre) ??
-        null;
+      const pendiente = await roundMonitoringStorage.findResumableForUser(userId, {
+        moduloLabel: stats.rondaActivaNombre,
+      });
       setActiveDraft(pendiente);
     } finally {
       setLoadingDraft(false);
@@ -137,7 +141,34 @@ export default function JornadaSummary({ stats, userId, onContinueRound }: Props
         </div>
       )}
 
-      {(stats.rondaActivaNombre || ultimaRonda) && !activeDraft && (
+      {!activeDraft && stats.rondaActivaNombre && onContinueRoundByName && (
+        <div className="rounded-xl border-2 border-warning/50 bg-warning/10 p-3 space-y-2">
+          <p className="font-bold text-foreground">
+            Ronda en curso: <span className="text-primary">{stats.rondaActivaNombre}</span>
+          </p>
+          <p className="text-[10px] text-muted-foreground">
+            {stats.efectivas}/{metaCasas} efectivas (E) en tu jornada de hoy. Tocá continuar para
+            recuperar el monitoreo desde la nube o este dispositivo.
+          </p>
+          <button
+            type="button"
+            onClick={() => onContinueRoundByName(stats.rondaActivaNombre!)}
+            disabled={loadingDraft}
+            className="mrv-btn-primary w-full text-sm min-h-[44px]"
+          >
+            {loadingDraft ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <>
+                <Play className="w-4 h-4" />
+                Continuar {stats.rondaActivaNombre}
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
+      {(stats.rondaActivaNombre || ultimaRonda) && !activeDraft && !onContinueRoundByName && (
         <div className="flex items-start gap-2 pb-2 border-b border-border/60">
           <ClipboardList className="h-4 w-4 shrink-0 text-primary mt-0.5" />
           <div className="min-w-0">

@@ -9,8 +9,8 @@ import {
 export { crearCasasVacias, anadirCasaARonda };
 import { ensureRoundCodigo, generarCodigoRonda } from '@/lib/round-codigo';
 import { mergeRoundMonitoring } from '@/lib/round-merge';
-import { isRoundDismissed, isRoundResumable } from '@/lib/round-resume';
-import { isRoundDraftActive, MAX_ACTIVE_ROUNDS_PER_USER } from '@/lib/round-active-limit';
+import { isRoundDismissed, isRoundResumable, rondaIncompleta } from '@/lib/round-resume';
+import { MAX_ACTIVE_ROUNDS_PER_USER } from '@/lib/round-active-limit';
 import { fetchRoundDraftsFromServer } from '@/services/roundDraftApi';
 
 const DB_NAME = 'mrv_rounds';
@@ -101,7 +101,47 @@ export const roundMonitoringStorage = {
 
   async listByUser(userId: string, limit = 50): Promise<RoundMonitoring[]> {
     const all = await this.listAll(limit * 2);
-    return all.filter((r) => r.userId === userId).slice(0, limit);
+    const isParticipant = (r: RoundMonitoring) =>
+      String(r.userId) === String(userId) ||
+      (r.colaboradorUserIds || []).some((id) => String(id) === String(userId));
+    return all.filter(isParticipant).slice(0, limit);
+  },
+
+  /** Busca ronda retomable (activa, descartada o solo en nube) por nombre opcional. */
+  async findResumableForUser(
+    userId: string,
+    hint?: { moduloLabel?: string }
+  ): Promise<RoundMonitoring | null> {
+    const norm = (s: string) => s.trim().toLowerCase();
+    const hintNorm = hint?.moduloLabel?.trim() ? norm(hint.moduloLabel) : null;
+
+    const pick = (rows: RoundMonitoring[]) => {
+      const pool = rows.map((r) => aplicarMetaFija(ensureRoundCodigo(r))).filter((r) => rondaIncompleta(r));
+      if (hintNorm) {
+        const byName = pool.find((r) => norm(r.moduloLabel) === hintNorm);
+        if (byName) return byName;
+      }
+      return pool[0] ?? null;
+    };
+
+    await this.syncDraftsFromServer(userId);
+
+    const active = await this.listActiveDraftsForUser(userId);
+    const fromActive = pick(active);
+    if (fromActive) return fromActive;
+
+    const resumable = await this.listResumableForUser(userId, { includeDismissed: true });
+    const fromLocal = pick(resumable);
+    if (fromLocal) return fromLocal;
+
+    const remote = (await fetchRoundDraftsFromServer())
+      .filter(
+        (r) =>
+          String(r.userId) === String(userId) ||
+          (r.colaboradorUserIds || []).some((id) => String(id) === String(userId))
+      )
+      .map((r) => aplicarMetaFija(ensureRoundCodigo({ ...r, userId: r.userId || userId })));
+    return pick(remote);
   },
 
   /** Última ronda del usuario que puede retomarse (p. ej. al cambiar de pestaña o recargar). */
@@ -151,7 +191,7 @@ export const roundMonitoringStorage = {
       merged.set(r.id, prev ? mergeRoundMonitoring(prev, local) : local);
     }
     return [...merged.values()]
-      .filter((r) => isRoundDraftActive(r) && !isRoundDismissed(userId, r.id))
+      .filter((r) => rondaIncompleta(r) && isRoundResumable(r) && !isRoundDismissed(userId, r.id))
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .slice(0, MAX_ACTIVE_ROUNDS_PER_USER);
   },

@@ -1,4 +1,5 @@
 import { countCasasEfectivas } from '@/lib/croquis-housing';
+import { META_CASAS_EFECTIVAS } from '@/lib/round-meta';
 import type { RoundMonitoring } from '@/types/round-monitoring';
 
 const dismissKey = (userId: string) => `mrv_round_dismissed_${userId}`;
@@ -59,5 +60,6 @@ export function clearAllDismissedRounds(userId: string): void {
 
 /** Ronda incompleta (meta de efectivas no alcanzada). */
 export function rondaIncompleta(round: RoundMonitoring): boolean {
-  return !rondaCompletada(round) && countCasasEfectivas(round.casas) < round.totalCasas;
+  const meta = Math.min(round.totalCasas || META_CASAS_EFECTIVAS, META_CASAS_EFECTIVAS);
+  return !rondaCompletada(round) && countCasasEfectivas(round.casas) < meta;
 }

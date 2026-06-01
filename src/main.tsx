@@ -13,7 +13,7 @@ document.documentElement.lang = "es";
 document.documentElement.translate = false;
 
 /** Bump al desplegar si hay que forzar otro barrido (chunks viejos, SW roto). */
-const SW_SWEEP_KEY = "mrv-sw-sweep-2026-06-01-v38-bootfix";
+const SW_SWEEP_KEY = "mrv-sw-sweep-2026-06-01-v39-resume";
 
 function sweepMarkerIsSet(): boolean {
   try {

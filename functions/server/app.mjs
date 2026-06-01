@@ -1328,10 +1328,11 @@ export function createApp() {
       await ensureRoundDraftsTable();
       const { rows } = await query(
         `SELECT payload, updated_at FROM round_monitoring_drafts
-         WHERE is_active = true AND $1::uuid = ANY(participant_user_ids)
+         WHERE $1::uuid = ANY(participant_user_ids)
+           AND efectivas_count < $2
          ORDER BY updated_at DESC
-         LIMIT $2`,
-        [req.user.sub, MAX_ACTIVE_ROUNDS]
+         LIMIT $3`,
+        [req.user.sub, META_CASAS_EFECTIVAS, MAX_ACTIVE_ROUNDS + 2]
       );
       const data = rows.map((r) => {
         const p = typeof r.payload === 'object' ? r.payload : JSON.parse(String(r.payload));

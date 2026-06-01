@@ -40,12 +40,16 @@ describe('round-active-limit', () => {
   });
 
   it('ronda con meta E cumplida no es activa', () => {
-    const r = baseRound({
-      casas: [
-        { numero: 1, estado: 'E', ninos: [], guardada: true, latitud: null, longitud: null, guardadaAt: 1 },
-        { numero: 2, estado: 'E', ninos: [], guardada: true, latitud: null, longitud: null, guardadaAt: 2 },
-      ],
-    });
+    const casasE = Array.from({ length: 20 }, (_, i) => ({
+      numero: i + 1,
+      estado: 'E' as const,
+      ninos: [],
+      guardada: true,
+      latitud: null,
+      longitud: null,
+      guardadaAt: i + 1,
+    }));
+    const r = baseRound({ totalCasas: 20, casas: casasE, fase: 'summary', completedAt: Date.now() });
     expect(isRoundDraftActive(r)).toBe(false);
   });
 
