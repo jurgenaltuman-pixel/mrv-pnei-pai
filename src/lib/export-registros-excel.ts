@@ -2,9 +2,48 @@ import * as XLSX from 'xlsx';
 import type { RegistroMRV } from '@/services/dataService';
 import { formatFechaHoraPy, formatFechaPy } from '@/lib/format-fecha';
 import { saveBlobAsFile } from '@/lib/download-file';
-import { appendMetaSheet, jsonSheetWithCols } from '@/lib/xlsx-report-utils';
+import { appendMetaSheet, buildLabeledExcelRows, jsonSheetWithCols, type ExcelColumnDef } from '@/lib/xlsx-report-utils';
+import { getVisitaCode } from '@/lib/visita-filter';
 
 const CAMBIO_TAG = '[Cambio de residencia]';
+
+export const REGISTROS_EXCEL_COLUMNS: ExcelColumnDef[] = [
+  { key: 'fecha_hora', label: 'Fecha y hora', core: true },
+  { key: 'region', label: 'Región', core: true },
+  { key: 'distrito', label: 'Distrito', core: true },
+  { key: 'servicio_salud', label: 'Servicio de salud', core: true },
+  { key: 'barrio', label: 'Barrio', core: true },
+  { key: 'responsable', label: 'Responsable', core: true },
+  { key: 'tipo_vivienda', label: 'Casa (E/N/F/R)', core: true },
+  { key: 'nombre_nino', label: 'Nombre niño/a', core: true },
+  { key: 'tipo_documento', label: 'Tipo documento' },
+  { key: 'documento', label: 'Documento', core: true },
+  { key: 'fecha_nacimiento', label: 'Fecha nacimiento', core: true },
+  { key: 'edad', label: 'Edad (años)' },
+  { key: 'sexo', label: 'Sexo', core: true },
+  { key: 'estado_vacuna', label: 'Estado vacuna', core: true },
+  { key: 'motivo', label: 'Motivo / acción' },
+  { key: 'dosis_spr', label: 'Dosis SPR' },
+  { key: 'fecha_dosis_spr', label: 'Fecha dosis SPR' },
+  { key: 'esquema_completo', label: 'Esquema completo' },
+  { key: 'libreta_vacunacion', label: 'Libreta vacunación' },
+  { key: 'fuente_verificacion', label: 'Fuente verificación' },
+  { key: 'tiene_cvs', label: 'Tiene CVS' },
+  { key: 'accion_tomada', label: 'Acción tomada' },
+  { key: 'estado_intervencion', label: 'Estado intervención' },
+  { key: 'cambio_residencia', label: 'Cambio residencia' },
+  { key: 'observaciones', label: 'Observaciones' },
+  { key: 'tiene_gps', label: 'Tiene GPS', core: true },
+  { key: 'latitud', label: 'Latitud WGS84', core: true },
+  { key: 'longitud', label: 'Longitud WGS84', core: true },
+  { key: 'coordenadas_wgs84', label: 'Coordenadas WGS84' },
+  { key: 'enlace_google_maps', label: 'Enlace Google Maps' },
+  { key: 'transcripcion_clip', label: 'Transcripción clip' },
+  { key: 'enlace_imagen_1', label: 'Imagen 1 (Drive)' },
+  { key: 'enlace_imagen_2', label: 'Imagen 2 (Drive)' },
+  { key: 'registro_id', label: 'ID registro' },
+  { key: 'user_id', label: 'ID usuario' },
+];
 
 export function parseCambioResidencia(observaciones: string | null | undefined): {
   cambio: boolean;
@@ -28,6 +67,37 @@ function boolTxt(v: boolean | null | undefined): string {
   if (v === true) return 'Sí';
   if (v === false) return 'No';
   return '';
+}
+
+function calcEdadAnios(fechaNacimiento: string | null | undefined, edadRaw: string | null | undefined): string {
+  if (edadRaw != null && String(edadRaw).trim() !== '') return String(edadRaw).trim();
+  const iso = (fechaNacimiento || '').slice(0, 10);
+  if (!iso) return '';
+  const birth = new Date(`${iso}T12:00:00`);
+  if (Number.isNaN(birth.getTime())) return '';
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age -= 1;
+  return age >= 0 && age <= 120 ? String(age) : '';
+}
+
+function estadoVacunaLabel(v: string | null | undefined): string {
+  if (v === 'vacunado') return 'Vacunado';
+  if (v === 'no_vacunado') return 'No vacunado';
+  return v || '';
+}
+
+function estadoIntervencionLabel(v: string | null | undefined): string {
+  if (!v) return '';
+  if (v === 'rechazo_vacunacion') return 'Rechazo a la vacunación';
+  return v.replace(/_/g, ' ');
+}
+
+function tipoViviendaLabel(r: RegistroMRV): string {
+  const code = getVisitaCode(r);
+  if (code) return code;
+  return r.tipo_vivienda || '';
 }
 
 /** WGS84 con 6 decimales (≈ 11 cm) — adecuado para Google Maps. */
@@ -108,13 +178,15 @@ export function mapApiRowToRegistroMRV(row: Record<string, unknown>): RegistroMR
   };
 }
 
-/** Fila completa para análisis (incluye GPS listo para Google Maps / My Maps). */
+/** Fila técnica completa; columnas vacías se omiten al exportar (salvo core). */
 export function registroToExcelRow(r: RegistroMRV & { tipo_documento?: string | null }) {
   const { cambio, observacionesLimpias } = parseCambioResidencia(r.observaciones);
   const lat = formatCoordWgs84(r.latitud);
   const lng = formatCoordWgs84(r.longitud);
   const tieneGps = coordenadasValidas(r.latitud, r.longitud);
   const mapsUrl = enlaceGoogleMaps(r.latitud, r.longitud);
+  const code = getVisitaCode(r);
+  const edad = calcEdadAnios(r.fecha_nacimiento, r.edad);
 
   return {
     registro_id: r.id || '',
@@ -130,19 +202,19 @@ export function registroToExcelRow(r: RegistroMRV & { tipo_documento?: string | 
     tipo_documento: r.tipo_documento || '',
     documento: r.documento || '',
     fecha_nacimiento: r.fecha_nacimiento ? formatFechaPy(r.fecha_nacimiento) : '',
-    edad: r.edad || '',
+    edad,
     sexo: r.sexo || '',
     libreta_vacunacion: boolTxt(r.libreta),
     fuente_verificacion: r.fuente_verificacion || '',
-    tiene_cvs: boolTxt(r.tiene_cvs),
+    tiene_cvs: code === 'E' || !code ? boolTxt(r.tiene_cvs) : '',
     dosis_spr: r.dosis_spr || '',
     fecha_dosis_spr: r.fecha_dosis_spr ? formatFechaPy(r.fecha_dosis_spr) : '',
-    estado_vacuna: r.estado_vacuna || '',
-    esquema_completo: boolTxt(r.esquema_completo),
+    estado_vacuna: code === 'N' || code === 'F' || code === 'R' ? '' : estadoVacunaLabel(r.estado_vacuna),
+    esquema_completo: code === 'E' || !code ? boolTxt(r.esquema_completo) : '',
     motivo: r.motivo || '',
     accion_tomada: r.accion_tomada || '',
-    estado_intervencion: r.estado_intervencion || '',
-    tipo_vivienda: r.tipo_vivienda || '',
+    estado_intervencion: estadoIntervencionLabel(r.estado_intervencion),
+    tipo_vivienda: tipoViviendaLabel(r),
     observaciones: observacionesLimpias,
     tiene_gps: tieneGps ? 'Sí' : 'No',
     latitud: lat,
@@ -152,30 +224,30 @@ export function registroToExcelRow(r: RegistroMRV & { tipo_documento?: string | 
     transcripcion_clip: r.transcripcion_clip || '',
     enlace_imagen_1: r.enlace_imagen_1 || '',
     enlace_imagen_2: r.enlace_imagen_2 || '',
-    almacenamiento: 'Aiven (registros_vacunacion)',
   };
 }
 
 export function downloadRegistrosExcel(
   registros: (RegistroMRV & { tipo_documento?: string | null })[],
   filenamePrefix = 'MRV_Registros',
-  meta?: { nota?: string; total?: number }
+  meta?: { nota?: string; total?: number; filtros?: string }
 ) {
-  const rows = registros.map(registroToExcelRow);
+  const rawRows = registros.map(registroToExcelRow);
+  const rows = buildLabeledExcelRows(rawRows, REGISTROS_EXCEL_COLUMNS);
   const wb = XLSX.utils.book_new();
   jsonSheetWithCols(wb, rows, 'Registros');
   appendMetaSheet(wb, [
-    { campo: 'sistema', valor: 'MRV — Monitoreo Rápido de Vacunación' },
-    { campo: 'generado', valor: formatFechaHoraPy(new Date()) },
-    { campo: 'total_filas', valor: String(meta?.total ?? registros.length) },
+    { campo: 'Sistema', valor: 'MRV — Monitoreo Rápido de Vacunación · MSPBS' },
+    { campo: 'Generado', valor: formatFechaHoraPy(new Date()) },
+    { campo: 'Total filas', valor: String(meta?.total ?? registros.length) },
+    { campo: 'Columnas', valor: 'Solo se incluyen columnas con datos (excepto campos base). Etiquetas en español.' },
+    ...(meta?.filtros ? [{ campo: 'Filtros aplicados', valor: meta.filtros }] : []),
     {
-      campo: 'nota',
+      campo: 'Nota GPS',
       valor:
         meta?.nota ||
-        'Coordenadas WGS84 (lat, lon). Columna enlace_google_maps abre la ubicación. coordenadas_wgs84 sirve para importar en My Maps.',
+        'Coordenadas WGS84 (lat, lon). «Enlace Google Maps» abre la ubicación. Columnas vacías en todo el lote no se exportan.',
     },
-    { campo: 'latitud', valor: 'Grados decimales (-90 a 90)' },
-    { campo: 'longitud', valor: 'Grados decimales (-180 a 180)' },
   ]);
 
   const fn = `${filenamePrefix}_${new Date().toISOString().slice(0, 10)}.xlsx`;

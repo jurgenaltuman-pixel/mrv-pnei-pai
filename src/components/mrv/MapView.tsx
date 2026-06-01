@@ -3,7 +3,9 @@ import { useRegistrosQuery } from '@/hooks/useRegistrosQuery';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGeolocation } from '@/hooks/useGeolocation';
 import { MapSkeleton } from '@/components/mrv/PageSkeleton';
-import { MapPin, Navigation, RefreshCw, Filter } from 'lucide-react';
+import VisitaMapFilterBar from '@/components/mrv/VisitaMapFilterBar';
+import { filterRegistrosByVisita, type VisitaMapFilter } from '@/lib/visita-filter';
+import { MapPin, Navigation, RefreshCw } from 'lucide-react';
 
 const MrvMapPanel = lazy(() => import('@/components/mrv/MrvMapPanel'));
 
@@ -11,13 +13,12 @@ export default function MapView() {
   const { user } = useAuth();
   const geo = useGeolocation();
   const { data: registros = [], isLoading, isFetching, refetch } = useRegistrosQuery(2500, Boolean(user?.id));
-  const [filtro, setFiltro] = useState<'todos' | 'vacunado' | 'no_vacunado'>('todos');
+  const [filtro, setFiltro] = useState<VisitaMapFilter>('todos');
 
-  const filtrados = useMemo(() => {
-    if (filtro === 'todos') return registros;
-    if (filtro === 'vacunado') return registros.filter((r) => r.estado_vacuna === 'vacunado');
-    return registros.filter((r) => r.estado_vacuna === 'no_vacunado');
-  }, [registros, filtro]);
+  const filtrados = useMemo(
+    () => filterRegistrosByVisita(registros, filtro),
+    [registros, filtro]
+  );
 
   const geoCount = filtrados.filter((r) => r.latitud != null && r.longitud != null).length;
   const sinGps = filtrados.length - geoCount;
@@ -48,25 +49,7 @@ export default function MapView() {
         </div>
       </div>
 
-      <div className="flex gap-1.5 overflow-x-auto pb-1">
-        {([
-          { id: 'todos', label: 'Todos' },
-          { id: 'vacunado', label: 'Vacunados' },
-          { id: 'no_vacunado', label: 'No vacunados' },
-        ] as const).map((f) => (
-          <button
-            key={f.id}
-            type="button"
-            onClick={() => setFiltro(f.id)}
-            className={`shrink-0 h-8 px-3 rounded-full text-xs font-bold flex items-center gap-1 ${
-              filtro === f.id ? 'bg-primary text-primary-foreground' : 'bg-secondary text-secondary-foreground'
-            }`}
-          >
-            <Filter className="w-3 h-3" />
-            {f.label}
-          </button>
-        ))}
-      </div>
+      <VisitaMapFilterBar value={filtro} onChange={setFiltro} />
 
       {geo.status === 'granted' && geo.lat != null && (
         <div className="text-[11px] flex items-center gap-1.5 text-primary font-medium px-1">

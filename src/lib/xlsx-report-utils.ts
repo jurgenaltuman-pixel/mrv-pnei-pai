@@ -22,7 +22,8 @@ export function appendMetaSheet(
   sheetName = 'Info'
 ) {
   const ws = XLSX.utils.json_to_sheet(rows);
-  ws['!cols'] = [{ wch: 22 }, { wch: 72 }];
+  ws['!cols'] = [{ wch: 24 }, { wch: 76 }];
+  ws['!freeze'] = { xSplit: 0, ySplit: 1, topLeftCell: 'A2', activePane: 'bottomLeft', state: 'frozen' };
   XLSX.utils.book_append_sheet(wb, ws, sheetName);
 }
 
@@ -34,5 +35,63 @@ export function jsonSheetWithCols(
   const ws = XLSX.utils.json_to_sheet(rows);
   if (rows.length > 0) ws['!cols'] = autoColWidths(rows);
   ws['!freeze'] = { xSplit: 0, ySplit: 1, topLeftCell: 'A2', activePane: 'bottomLeft', state: 'frozen' };
+  ws['!autofilter'] = rows.length
+    ? { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows.length, c: Object.keys(rows[0]).length - 1 } }) }
+    : undefined;
   XLSX.utils.book_append_sheet(wb, ws, sheetName);
+}
+
+/** Omite columnas cuyo valor está vacío en todas las filas. */
+export function pruneEmptyColumns(rows: Record<string, unknown>[]): Record<string, unknown>[] {
+  if (!rows.length) return rows;
+  const keys = Object.keys(rows[0]);
+  const keep = keys.filter((k) =>
+    rows.some((r) => {
+      const v = r[k];
+      if (v == null) return false;
+      if (typeof v === 'number') return Number.isFinite(v);
+      return String(v).trim() !== '';
+    })
+  );
+  if (keep.length === keys.length) return rows;
+  return rows.map((r) => {
+    const out: Record<string, unknown> = {};
+    for (const k of keep) out[k] = r[k];
+    return out;
+  });
+}
+
+export type ExcelColumnDef = {
+  key: string;
+  label: string;
+  /** Si true, siempre se exporta aunque esté vacía. */
+  core?: boolean;
+};
+
+/** Convierte filas técnicas a etiquetas legibles y descarta columnas vacías (salvo core). */
+export function buildLabeledExcelRows(
+  rawRows: Record<string, unknown>[],
+  columns: ExcelColumnDef[]
+): Record<string, unknown>[] {
+  const optionalKeys = columns.filter((c) => !c.core).map((c) => c.key);
+  const includeOptional = new Set<string>();
+  for (const key of optionalKeys) {
+    const hasData = rawRows.some((r) => {
+      const v = r[key];
+      if (v == null) return false;
+      if (typeof v === 'number') return Number.isFinite(v);
+      return String(v).trim() !== '';
+    });
+    if (hasData) includeOptional.add(key);
+  }
+
+  const activeCols = columns.filter((c) => c.core || includeOptional.has(c.key));
+
+  return rawRows.map((r) => {
+    const out: Record<string, unknown> = {};
+    for (const col of activeCols) {
+      out[col.label] = r[col.key] ?? '';
+    }
+    return out;
+  });
 }

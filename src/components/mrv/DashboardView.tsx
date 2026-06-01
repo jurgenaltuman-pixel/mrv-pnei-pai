@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BarChart3,
   FileSpreadsheet,
@@ -13,6 +13,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useRole } from '@/hooks/useRole';
 import { useRegistrosQuery } from '@/hooks/useRegistrosQuery';
 import { buildDashboardData } from '@/lib/dashboard-stats';
+import { filterRegistrosByVisita, type VisitaMapFilter } from '@/lib/visita-filter';
 import { aggregateRoundsByServicio } from '@/lib/round-dashboard-stats';
 import {
   fetchAdminRoundHistory,
@@ -34,6 +35,8 @@ import {
 import { useProfileScope } from '@/hooks/useProfileScope';
 import { getJornadaStats } from '@/lib/jornada-storage';
 import JornadaSummary from '@/components/mrv/JornadaSummary';
+import VisitaMapFilterBar from '@/components/mrv/VisitaMapFilterBar';
+import { defaultUseNationalView } from '@/lib/report-scope';
 
 const DashboardCharts = lazy(() => import('@/components/mrv/DashboardCharts'));
 const MrvMapPanel = lazy(() => import('@/components/mrv/MrvMapPanel'));
@@ -66,12 +69,37 @@ function KpiCard({
 
 export default function DashboardView() {
   const { user } = useAuth();
-  const { isAdmin, isSuperAdmin } = useRole();
+  const role = useRole();
+  const {
+    isAdmin,
+    isSuperAdmin,
+    isSupervisor,
+    isRegional,
+    canViewNationalReports,
+    canAccessDashboardReports,
+  } = role;
   const { data: profileScope } = useProfileScope();
   const tieneAsignacionZonal = hasProfileScopeAssignment(profileScope);
   const [vistaNacional, setVistaNacional] = useState(true);
+  useEffect(() => {
+    if (!role.loading) {
+      setVistaNacional(
+        defaultUseNationalView(
+          {
+            roles: role.roles,
+            isSuperAdmin: role.isSuperAdmin,
+            isAdmin: role.isAdmin,
+            isSupervisor: role.isSupervisor,
+            isRegional: role.isRegional,
+          },
+          tieneAsignacionZonal
+        )
+      );
+    }
+  }, [role.loading, role.roles, role.isSuperAdmin, role.isAdmin, role.isSupervisor, role.isRegional, tieneAsignacionZonal]);
   const usarVistaNacional =
-    (isAdmin || isSuperAdmin) && (!tieneAsignacionZonal || vistaNacional);
+    canViewNationalReports && (!tieneAsignacionZonal || vistaNacional);
+  const verReportesAmpliados = canAccessDashboardReports;
 
   const {
     data: registros = [],
@@ -92,8 +120,10 @@ export default function DashboardView() {
   const [responsableFilter, setResponsableFilter] = useState('todos');
   const [roundCodigoFilter, setRoundCodigoFilter] = useState('');
   const [chartMode, setChartMode] = useState<'stacked' | 'coverage'>('stacked');
+  const [visitaMapFilter, setVisitaMapFilter] = useState<VisitaMapFilter>('todos');
   const [roundHistoryRows, setRoundHistoryRows] = useState<RoundHistoryRow[]>([]);
   const [exporting, setExporting] = useState(false);
+  const assignmentFiltersApplied = useRef(false);
   const [jornadaStats, setJornadaStats] = useState(() => getJornadaStats(''));
   const [roundsByServicio, setRoundsByServicio] = useState<ReturnType<typeof aggregateRoundsByServicio>>([]);
 
@@ -107,10 +137,21 @@ export default function DashboardView() {
   }, [refreshJornada]);
 
   useEffect(() => {
+    if (assignmentFiltersApplied.current || !profileScope) return;
+    const reg = profileScope.assigned_region?.trim();
+    const dist = profileScope.assigned_distrito?.trim();
+    const serv = profileScope.assigned_servicio?.trim();
+    if (!reg && !dist) return;
+    if (reg) setRegionFilter(reg);
+    if (dist) setDistritoFilter(dist);
+    if (serv) setServicioFilter(serv);
+    assignmentFiltersApplied.current = true;
+  }, [profileScope]);
+
+  useEffect(() => {
     if (!user?.id) return;
     void (async () => {
-      const roundFilters =
-        isAdmin || isSuperAdmin
+      const roundFilters = verReportesAmpliados
           ? {
               region: regionFilter !== 'todas' ? regionFilter : undefined,
               distrito: distritoFilter !== 'todos' ? distritoFilter : undefined,
@@ -119,8 +160,7 @@ export default function DashboardView() {
               roundCodigo: roundCodigoFilter.trim() || undefined,
             }
           : undefined;
-      const rows =
-        isAdmin || isSuperAdmin
+      const rows = verReportesAmpliados
           ? await fetchAdminRoundHistory(roundFilters)
           : await fetchMyRoundHistory();
       setRoundHistoryRows(rows);
@@ -128,8 +168,7 @@ export default function DashboardView() {
     })();
   }, [
     user?.id,
-    isAdmin,
-    isSuperAdmin,
+    verReportesAmpliados,
     regionFilter,
     distritoFilter,
     servicioFilter,
@@ -149,7 +188,15 @@ export default function DashboardView() {
     (v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
 
   const registrosVisibles = useMemo(() => {
-    if (isAdmin || isSuperAdmin) {
+    if (verReportesAmpliados) {
+      if (isRegional && !usarVistaNacional && profileScope?.assigned_region) {
+        const reg = profileScope.assigned_region;
+        return registros.filter(
+          (r) =>
+            (r.region || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase() ===
+            reg.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase()
+        );
+      }
       return filterRegistrosByProfileScope(registros, profileScope, {
         forceNational: usarVistaNacional,
       });
@@ -158,7 +205,7 @@ export default function DashboardView() {
       return filterRegistrosByProfileScope(registros, profileScope);
     }
     return registros;
-  }, [registros, isAdmin, isSuperAdmin, profileScope, usarVistaNacional]);
+  }, [registros, verReportesAmpliados, isRegional, profileScope, usarVistaNacional]);
 
   const registrosPorFecha = useMemo(
     () => filterRegistrosByDate(registrosVisibles, datePreset, customFrom, customTo),
@@ -240,11 +287,41 @@ export default function DashboardView() {
   );
 
   const data = useMemo(() => buildDashboardData(registrosFiltrados), [registrosFiltrados]);
-  const registrosMapa = useMemo(() => registrosFiltrados, [registrosFiltrados]);
+  const registrosVisitaView = useMemo(
+    () => filterRegistrosByVisita(registrosFiltrados, visitaMapFilter),
+    [registrosFiltrados, visitaMapFilter]
+  );
+  const dataVisita = useMemo(() => buildDashboardData(registrosVisitaView), [registrosVisitaView]);
+  const registrosMapa = registrosVisitaView;
   const total = data.totalVacunados + data.totalNoVacunados;
   const cobertura = total > 0 ? ((data.totalVacunados / total) * 100).toFixed(1) : '0';
-  const contadorViviendas = contadorDesdeDashboard(data.viviendas);
+  const contadorViviendas = contadorDesdeDashboard(
+    visitaMapFilter === 'todos' ? data.viviendas : dataVisita.viviendas
+  );
   const conGps = registrosMapa.filter((r) => r.latitud != null && r.longitud != null).length;
+
+  const filtrosExportLabel = useMemo(() => {
+    const parts: string[] = [];
+    parts.push(`Período: ${datePreset}`);
+    if (regionFilter !== 'todas') parts.push(`Región: ${regionFilter}`);
+    if (distritoFilter !== 'todos') parts.push(`Distrito: ${distritoFilter}`);
+    if (servicioFilter !== 'todos' && servicioFilter !== '_sin_servicio') parts.push(`Servicio: ${servicioFilter}`);
+    if (servicioFilter === '_sin_servicio') parts.push('Sin servicio');
+    if (barrioFilter !== 'todos') parts.push(`Barrio: ${barrioFilter}`);
+    if (responsableFilter !== 'todos') parts.push(`Responsable: ${responsableFilter}`);
+    if (visitaMapFilter !== 'todos') parts.push(`Visita: ${visitaMapFilter}`);
+    if (roundCodigoFilter.trim()) parts.push(`Ronda: ${roundCodigoFilter.trim()}`);
+    return parts.join(' · ');
+  }, [
+    datePreset,
+    regionFilter,
+    distritoFilter,
+    servicioFilter,
+    barrioFilter,
+    responsableFilter,
+    visitaMapFilter,
+    roundCodigoFilter,
+  ]);
 
   if (isLoading) return <PageSkeleton rows={5} />;
 
@@ -257,13 +334,15 @@ export default function DashboardView() {
             {registrosFiltrados.length} registros · {conGps} con GPS
             {isFetching && ' · actualizando…'}
           </p>
-          {(isAdmin || isSuperAdmin) && (
+          {verReportesAmpliados && (
             <p className="text-[10px] text-primary font-semibold mt-1">
               {usarVistaNacional
-                ? 'Vista nacional (todos los registros)'
-                : `Vista zonal: ${profileScope?.assigned_region} · ${profileScope?.assigned_distrito}${
-                    profileScope?.assigned_servicio ? ` · ${profileScope.assigned_servicio}` : ''
-                  }`}
+                ? 'Vista país (todos los registros)'
+                : isRegional && profileScope?.assigned_region
+                  ? `Vista regional: ${profileScope.assigned_region}`
+                  : `Vista zonal: ${profileScope?.assigned_region} · ${profileScope?.assigned_distrito}${
+                      profileScope?.assigned_servicio ? ` · ${profileScope.assigned_servicio}` : ''
+                    }`}
             </p>
           )}
           {isError && (
@@ -287,13 +366,10 @@ export default function DashboardView() {
             onClick={() => {
               setExporting(true);
               try {
-                const periodoLabel =
-                  datePreset === 'custom'
-                    ? `personalizado (${customFrom || '…'} – ${customTo || '…'})`
-                    : datePreset;
-                downloadRegistrosExcel(registrosVisibles, 'MRV_Registros', {
-                  total: registrosVisibles.length,
-                  nota: `Exportación completa del ámbito visible (${registrosVisibles.length} filas). El panel puede mostrar período «${periodoLabel}»; el Excel incluye todos los registros del ámbito con GPS WGS84 y enlace_google_maps.`,
+                downloadRegistrosExcel(registrosFiltrados, 'MRV_Registros', {
+                  total: registrosFiltrados.length,
+                  filtros: filtrosExportLabel,
+                  nota: `Exportación del panel (${registrosFiltrados.length} filas). Columnas sin datos en todo el lote omitidas; etiquetas en español.`,
                 });
               } finally {
                 setExporting(false);
@@ -305,7 +381,17 @@ export default function DashboardView() {
           </button>
           <button
             type="button"
-            onClick={() => downloadDashboardPdf(data, 'Panel · filtros aplicados')}
+            onClick={() =>
+              downloadDashboardPdf(data, {
+                titulo: 'Panel · filtros aplicados',
+                subtitulo: profileScope?.assigned_region
+                  ? `Asignación: ${profileScope.assigned_region}${profileScope.assigned_distrito ? ` · ${profileScope.assigned_distrito}` : ''}${profileScope.assigned_servicio ? ` · ${profileScope.assigned_servicio}` : ''}`
+                  : undefined,
+                filtros: filtrosExportLabel,
+                totalRegistros: registrosFiltrados.length,
+                conGps,
+              })
+            }
             className="dash-btn-primary"
           >
             <FileText className="w-3.5 h-3.5" /> PDF
@@ -315,7 +401,7 @@ export default function DashboardView() {
 
       {user && <JornadaSummary stats={jornadaStats} />}
 
-      {(isAdmin || isSuperAdmin) && tieneAsignacionZonal && (
+      {canViewNationalReports && tieneAsignacionZonal && (
         <label className="flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2.5 text-sm cursor-pointer">
           <input
             type="checkbox"
@@ -323,7 +409,7 @@ export default function DashboardView() {
             onChange={(e) => setVistaNacional(e.target.checked)}
             className="rounded border-input"
           />
-          <span className="font-medium">Ver todos los registros (vista nacional)</span>
+          <span className="font-medium">Ver todos los registros (vista país)</span>
         </label>
       )}
 
@@ -497,6 +583,13 @@ export default function DashboardView() {
         <KpiCard label="Total" value={total} icon={BarChart3} tone="warning" />
       </div>
 
+      <div className="dash-card p-3 space-y-2">
+        <p className="text-[11px] font-bold uppercase text-muted-foreground tracking-wide">
+          Filtro mapa · visitas E / N / F / R
+        </p>
+        <VisitaMapFilterBar value={visitaMapFilter} onChange={setVisitaMapFilter} />
+      </div>
+
       <HousingStatsPanel contador={contadorViviendas} variant="full" />
 
       <div className="dash-card overflow-hidden p-0">
@@ -540,7 +633,7 @@ export default function DashboardView() {
         <div className="dash-card p-4">
           <RoundHistoryAccordion
             rows={roundHistoryRows}
-            groupByUser={usarVistaNacional && (isAdmin || isSuperAdmin)}
+            groupByUser={usarVistaNacional && canViewNationalReports}
             title="Historial de rondas (servidor)"
           />
         </div>

@@ -43,6 +43,16 @@ export function buildDashboardData(registros: RegistroMRV[]): DashboardData {
     if (esVacunado) porResponsable[responsable].vacunados++;
     else if (esNoVacunadoComputable) porResponsable[responsable].noVacunados++;
 
+    const servicio = (r.servicio || '').trim() || 'Sin servicio';
+    if (!porServicio[servicio]) porServicio[servicio] = { vacunados: 0, noVacunados: 0 };
+    if (esVacunado) porServicio[servicio].vacunados++;
+    else if (esNoVacunadoComputable) porServicio[servicio].noVacunados++;
+
+    const barrio = (r.barrio || '').trim() || 'Sin barrio';
+    if (!porBarrio[barrio]) porBarrio[barrio] = { vacunados: 0, noVacunados: 0 };
+    if (esVacunado) porBarrio[barrio].vacunados++;
+    else if (esNoVacunadoComputable) porBarrio[barrio].noVacunados++;
+
     const tipo = normalizeTipoVivienda(r.tipo_vivienda);
     if (tipo && tipo in viviendas) viviendas[tipo]++;
     else viviendas.sin_dato++;
