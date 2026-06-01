@@ -42,7 +42,6 @@ import {
 } from '@/lib/visit-session-storage';
 import { CampaignAppHeader } from '@/components/branding/CampaignAppHeader';
 import { PadronOfflineBanner } from '@/components/mrv/PadronOfflineBanner';
-import { OfflineSyncBar } from '@/components/mrv/OfflineSyncBar';
 import FridayReminderBanner from '@/components/mrv/FridayReminderBanner';
 import { useFridayReminder } from '@/hooks/useFridayReminder';
 import ProfileScopeEditor from '@/components/mrv/ProfileScopeEditor';
@@ -160,7 +159,9 @@ export default function MainApp() {
 
   useEffect(() => {
     void refreshPending();
-  }, [refreshPending]);
+    const id = window.setInterval(() => void refreshPending(), 45_000);
+    return () => window.clearInterval(id);
+  }, [refreshPending, isOnline]);
 
   const runSyncAll = useCallback(
     async (silent = false) => {
@@ -1182,15 +1183,6 @@ export default function MainApp() {
             : undefined
         }
         pwaInstall={canInstall ? { canInstall: true, onInstall: install } : undefined}
-      />
-      <OfflineSyncBar
-        isOnline={isOnline}
-        syncing={syncingOffline}
-        onSync={() => runSyncAll()}
-        onStatusChange={(s) => {
-          setPendingCount(s.pendingRegistros);
-          setPendingDriveCount(s.pendingDriveImages);
-        }}
       />
       <PadronOfflineBanner isOnline={isOnline} />
       {fridayReminder.visible && fridayReminder.alertas && (

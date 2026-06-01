@@ -1,10 +1,18 @@
 /**
  * Subida a Google Drive (cuenta OAuth configurada en env).
  * Requiere: GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET,
- * GOOGLE_DRIVE_REFRESH_TOKEN, opcional GOOGLE_DRIVE_FOLDER_ID
+ * GOOGLE_DRIVE_REFRESH_TOKEN. Carpeta destino: GOOGLE_DRIVE_FOLDER_ID o MRV por defecto.
  */
 import { Readable } from 'stream';
 import { google } from 'googleapis';
+
+/** Carpeta MRV: https://drive.google.com/drive/folders/1TVTxNvx2jNrDK1b0dAGmSeFpsJONWqP7 */
+export const MRV_DEFAULT_DRIVE_FOLDER_ID = '1TVTxNvx2jNrDK1b0dAGmSeFpsJONWqP7';
+
+export function resolveDriveFolderId() {
+  const fromEnv = String(process.env.GOOGLE_DRIVE_FOLDER_ID || '').trim();
+  return fromEnv || MRV_DEFAULT_DRIVE_FOLDER_ID;
+}
 
 function getOAuthClient() {
   const clientId = process.env.GOOGLE_DRIVE_CLIENT_ID;
@@ -43,9 +51,7 @@ export async function uploadBufferToGoogleDrive(opts) {
   const safeDoc = String(documento || 'sin-doc').replace(/[^\w.-]+/g, '_').slice(0, 40);
   const name = `MRV_${safeDoc}_${Date.now()}_${filename.replace(/[^\w.-]+/g, '_')}`.slice(0, 120);
 
-  const parents = process.env.GOOGLE_DRIVE_FOLDER_ID
-    ? [process.env.GOOGLE_DRIVE_FOLDER_ID]
-    : undefined;
+  const parents = [resolveDriveFolderId()];
 
   const created = await drive.files.create({
     requestBody: { name, parents },

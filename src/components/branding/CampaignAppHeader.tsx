@@ -106,42 +106,58 @@ export function CampaignAppHeader({
           </div>
 
           <div className="flex flex-col items-end gap-1.5 shrink-0 row-span-2 sm:row-span-1 self-center">
-            {(pendingCount > 0 || pendingDriveCount > 0 || !isOnline) && (
-              <span
-                className="inline-flex rounded-lg px-1.5 py-0.5 text-[10px] font-bold border bg-amber-100 text-amber-950 border-amber-200/80"
-                title={
-                  !isOnline
-                    ? 'Sin conexión'
-                    : `${pendingCount} registro(s)${pendingDriveCount ? ` · ${pendingDriveCount} foto(s)` : ''} pendientes`
-                }
-              >
-                {!isOnline ? (
-                  <WifiOff className="w-3 h-3" aria-hidden />
-                ) : (
-                  pendingCount + pendingDriveCount
-                )}
-              </span>
-            )}
             <div className="flex flex-col items-stretch gap-1.5">
               {onSyncAll && (
-                <button
-                  type="button"
-                  disabled={syncing || !isOnline}
-                  onClick={onSyncAll}
-                  className={`h-10 w-10 rounded-xl border inline-flex items-center justify-center active:scale-[0.98] disabled:opacity-50 ${
-                    pendingCount > 0 || pendingDriveCount > 0
-                      ? 'text-white bg-[#0055A4] hover:bg-[#003d7a] border-sky-900/20'
-                      : 'text-[#0c4a6e] bg-white/90 hover:bg-white border-sky-200/80'
+                <div
+                  className={`flex items-center gap-1.5 rounded-xl border px-1.5 py-1 max-w-[11.5rem] sm:max-w-[13rem] ${
+                    pendingCount > 0 || pendingDriveCount > 0 || !isOnline
+                      ? 'bg-amber-50/95 border-amber-200/90 dark:bg-amber-950/40 dark:border-amber-800'
+                      : 'border-transparent p-0'
                   }`}
-                  title={
-                    pendingCount > 0 || pendingDriveCount > 0
-                      ? 'Sincronizar registros y fotos pendientes'
-                      : 'Sincronizar'
-                  }
-                  aria-label="Sincronizar"
                 >
-                  <CloudUpload className={`w-4 h-4 ${syncing ? 'animate-pulse' : ''}`} />
-                </button>
+                  {(pendingCount > 0 || pendingDriveCount > 0 || !isOnline) && (
+                    <span className="min-w-0 flex-1 text-[9px] sm:text-[10px] font-semibold leading-tight text-amber-950 dark:text-amber-50">
+                      {!isOnline ? (
+                        <span className="inline-flex items-center gap-0.5">
+                          <WifiOff className="w-3 h-3 shrink-0" aria-hidden />
+                          Sin conexión
+                        </span>
+                      ) : (
+                        <>
+                          <strong>{pendingCount}</strong> reg.
+                          {pendingDriveCount > 0 && (
+                            <>
+                              {' '}
+                              · <strong>{pendingDriveCount}</strong> foto
+                              {pendingDriveCount === 1 ? '' : 's'}
+                            </>
+                          )}{' '}
+                          pendientes
+                        </>
+                      )}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    disabled={syncing || !isOnline}
+                    onClick={onSyncAll}
+                    className={`h-10 w-10 shrink-0 rounded-xl border inline-flex items-center justify-center active:scale-[0.98] disabled:opacity-50 ${
+                      pendingCount > 0 || pendingDriveCount > 0
+                        ? 'text-white bg-[#0055A4] hover:bg-[#003d7a] border-sky-900/20'
+                        : 'text-[#0c4a6e] bg-white/90 hover:bg-white border-sky-200/80 dark:bg-slate-800 dark:text-sky-100 dark:border-slate-600'
+                    }`}
+                    title={
+                      pendingCount > 0 || pendingDriveCount > 0
+                        ? 'Sincronizar registros y fotos pendientes'
+                        : !isOnline
+                          ? 'Sin conexión'
+                          : 'Sincronizar'
+                    }
+                    aria-label="Sincronizar"
+                  >
+                    <CloudUpload className={`w-4 h-4 ${syncing ? 'animate-pulse' : ''}`} />
+                  </button>
+                </div>
               )}
               <ThemeToggle className="!h-10 !w-10 !p-0 !rounded-xl border-sky-200/80 dark:border-slate-600" />
               <button

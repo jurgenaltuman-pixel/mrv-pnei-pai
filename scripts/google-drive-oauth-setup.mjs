@@ -21,11 +21,12 @@ if (!clientId || !clientSecret) {
   process.exit(1);
 }
 
-const REDIRECT = 'http://127.0.0.1:53682/oauth2callback';
+const PORT = Number(process.env.GOOGLE_DRIVE_OAUTH_PORT || 53682);
+const REDIRECT = `http://127.0.0.1:${PORT}/oauth2callback`;
 const oauth2 = new google.auth.OAuth2(clientId, clientSecret, REDIRECT);
 const scopes = ['https://www.googleapis.com/auth/drive.file'];
 
-const url = oauth2.generateAuthUrl({ access_type: 'offline', prompt: 'consent', scope: scopes });
+const authUrl = oauth2.generateAuthUrl({ access_type: 'offline', prompt: 'consent', scope: scopes });
 
 const server = http.createServer(async (req, res) => {
   if (!req.url?.startsWith('/oauth2callback')) {
@@ -47,7 +48,21 @@ const server = http.createServer(async (req, res) => {
   process.exit(0);
 });
 
-server.listen(53682, () => {
-  console.log('Abrí en el navegador (cuenta jurgenaltuman@gmail.com o la que uses para Drive):\n');
-  console.log(url);
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(
+      `\nPuerto ${PORT} en uso. Cerrá otras terminales con google-drive-oauth-setup o ejecutá:\n` +
+        `  $env:GOOGLE_DRIVE_OAUTH_PORT=53683; node scripts/google-drive-oauth-setup.mjs\n` +
+        `(y agregá http://127.0.0.1:53683/oauth2callback en Google Cloud → cliente OAuth Escritorio, si usás otro puerto)\n`
+    );
+  } else {
+    console.error(err.message);
+  }
+  process.exit(1);
+});
+
+server.listen(PORT, () => {
+  console.log(`Escuchando en ${REDIRECT}\n`);
+  console.log('Abrí en el navegador (cuenta de prueba en Google Cloud → Público):\n');
+  console.log(authUrl);
 });

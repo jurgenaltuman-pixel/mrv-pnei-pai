@@ -39,6 +39,7 @@ import {
   isRealUserEmail,
   normalizeNominaDocumento,
 } from '@/lib/nomina-profile';
+import { resolveSignupOrgSelection as resolveOrgFromCatalog } from '@/lib/org-name-match';
 
 interface UserSuggestion {
   documento: string;
@@ -167,12 +168,8 @@ export default function LoginPage() {
         nomina_documento: doc,
       });
       if (!result.ok) setError(result.error || 'Error al registrarse');
-      else if (result.autoApproved) {
-        setSuccess('✅ Registro desde nómina completado. Ya podés ingresar sin esperar aprobación.');
-      } else {
-        setSuccess(
-          '✅ Solicitud enviada. Un administrador debe aprobar tu cuenta antes del primer ingreso.'
-        );
+      else {
+        setSuccess('✅ Registro completado. Ya podés ingresar con tu usuario y contraseña.');
       }
     } else {
       const result = await login(identifier, password);
@@ -305,6 +302,15 @@ export default function LoginPage() {
     }, debounceDelay);
   };
 
+  const allDistritos = useMemo(
+    () => regiones.flatMap((r) => getDistritosByRegion(r.id)),
+    [regiones, getDistritosByRegion]
+  );
+  const allServicios = useMemo(
+    () => allDistritos.flatMap((d) => getServiciosByDistrito(d.id)),
+    [allDistritos, getServiciosByDistrito]
+  );
+
   const applyNominaSelection = (user: UserSuggestion) => {
     const doc = normalizeNominaDocumento(user.documento) || user.documento;
     setCi(doc);
@@ -316,9 +322,13 @@ export default function LoginPage() {
     } else if (isPlaceholderEmail(identifier)) {
       setIdentifier('');
     }
-    if (user.assigned_region) setSignupRegion(user.assigned_region);
-    if (user.assigned_distrito) setSignupDistrito(user.assigned_distrito);
-    if (user.assigned_servicio) setSignupServicio(user.assigned_servicio);
+    const org = resolveOrgFromCatalog(
+      { regiones, distritos: allDistritos, servicios: allServicios },
+      user
+    );
+    if (org.region) setSignupRegion(org.region);
+    if (org.distrito) setSignupDistrito(org.distrito);
+    if (org.servicio) setSignupServicio(org.servicio);
     setCiFound(user);
     setNominaMatched(true);
     setManualSignupOpen(true);

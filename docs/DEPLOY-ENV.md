@@ -37,6 +37,24 @@ npm run aiven:free-operational-disk -- --confirm
 
 Visible en **Identificación del niño** → buscar por documento (≥4 dígitos) → bloque azul **«Subir transcripción y fotos (Drive)»**.  
 En Vercel hace falta: `GOOGLE_DRIVE_CLIENT_ID`, `GOOGLE_DRIVE_CLIENT_SECRET`, `GOOGLE_DRIVE_REFRESH_TOKEN` (ver `docs/GOOGLE-DRIVE-ADJUNTOS.md`).
+
+### Nómina de brigadistas (registro / búsqueda)
+
+Fuente oficial: `Listado de usuarios activos para MRV.xlsx` (columnas: Documento, Nombre Completo, Región, Distrito, Servicio).
+
+```bash
+# Solo monitoreo (no modifica la BD):
+npm run aiven:monitor-nomina
+
+# Completar faltantes sin tocar cuentas con Gmail/correo real ya creadas:
+npm run aiven:sync-nomina
+# o:
+node scripts/sync-nomina-excel.mjs --respect-credenciales "C:\Users\usuario\Documents\Listado de usuarios activos para MRV.xlsx"
+```
+
+Escribe en **Aiven** (`profiles` + `auth_credentials`): CI en `nomina_documento`, nombre real, región/distrito/servicio. Contraseña inicial importada: `Mrv` + últimos 4 dígitos del CI + `!`.
+
+**Protegidos (no se modifican):** usuarios con `auth_credentials` bcrypt (`$2…`) y correo distinto de `@mrv.import` / `@system.vaccinator` (ej. Gmail, cuentas manuales como `vilmaperez@gmail.com`).
 | `JWT_SECRET` | Clave larga aleatoria para tokens de sesión (misma en todos los deploys; si cambia, los APK viejos pierden sesión) |
 
 Opcional:
@@ -45,7 +63,7 @@ Opcional:
 |----------|-------------|
 | `CORS_ORIGIN` | Orígenes permitidos separados por coma (por defecto ya incluye `mrvpai.web.app` y Vercel) |
 | `GOOGLE_DRIVE_CLIENT_ID`, `GOOGLE_DRIVE_CLIENT_SECRET`, `GOOGLE_DRIVE_REFRESH_TOKEN` | Adjuntos de búsqueda → Drive ([GOOGLE-DRIVE-ADJUNTOS.md](./GOOGLE-DRIVE-ADJUNTOS.md)) |
-| `GOOGLE_DRIVE_FOLDER_ID` | (Opcional) Carpeta destino en Drive |
+| `GOOGLE_DRIVE_FOLDER_ID` | Carpeta MRV en Drive (`1TVTxNvx2jNrDK1b0dAGmSeFpsJONWqP7` — [enlace](https://drive.google.com/drive/folders/1TVTxNvx2jNrDK1b0dAGmSeFpsJONWqP7?usp=sharing)); por defecto ya está en el código |
 
 Después de cambiar variables: **Redeploy** en Vercel (Deployments → ⋮ → Redeploy).
 
