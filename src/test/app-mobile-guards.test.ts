@@ -33,12 +33,23 @@ describe('app mobile guards', () => {
     expect(src).toContain('puedeGuardarClipDrive');
   });
 
-  it('OCR expone cámara y galería por target', () => {
+  it('OCR escáner solo en app nativa (ChildDataSection)', () => {
+    const child = fs.readFileSync(path.join(root, 'src/components/mrv/ChildDataSection.tsx'), 'utf8');
+    expect(child).toContain('isNativeApp()');
+    expect(child).toContain('CedulaOcrButtons');
+  });
+
+  it('OCR APK: flujo escanear y autocompletar', () => {
     const src = fs.readFileSync(path.join(root, 'src/components/mrv/CedulaOcrButtons.tsx'), 'utf8');
-    expect(src).toContain('cameraRef');
-    expect(src).toContain('galleryRef');
-    expect(src).toContain("openPicker(t, 'camera')");
-    expect(src).toContain("openPicker(t, 'gallery')");
+    expect(src).toContain('Escanear CI');
+    expect(src).toContain('Autocompletar');
+    expect(src).toContain('scanCedulaFromFile');
+  });
+
+  it('OCR multipaso y sin bloqueo permanente', () => {
+    const src = fs.readFileSync(path.join(root, 'src/lib/cedula-ocr.ts'), 'utf8');
+    expect(src).toContain('recognizeWithModes');
+    expect(src).toContain('hasUsefulCedulaData');
   });
 
   it('service worker precachea assets Tesseract offline', () => {

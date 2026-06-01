@@ -1,4 +1,10 @@
-import { parseCedulaOcrText, type CedulaOcrFields, type CedulaOcrTarget } from '@/lib/cedula-ocr-parse';
+import {
+  hasUsefulCedulaData,
+  normalizeOcrRawText,
+  parseCedulaOcrText,
+  type CedulaOcrFields,
+  type CedulaOcrTarget,
+} from '@/lib/cedula-ocr-parse';
 
 let workerPromise: Promise<import('tesseract.js').Worker> | null = null;
 
@@ -20,6 +26,7 @@ async function getOcrWorker(): Promise<import('tesseract.js').Worker> {
       });
       await worker.setParameters({
         tessedit_pageseg_mode: PSM.AUTO,
+        preserve_interword_spaces: '1',
       });
       return worker;
     })().catch((e) => {
@@ -28,6 +35,14 @@ async function getOcrWorker(): Promise<import('tesseract.js').Worker> {
     });
   }
   return workerPromise;
+}
+
+function drawPreprocessed(ctx: CanvasRenderingContext2D, source: CanvasImageSource, w: number, h: number) {
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, w, h);
+  ctx.filter = 'grayscale(1) contrast(1.55) brightness(1.08)';
+  ctx.drawImage(source, 0, 0, w, h);
+  ctx.filter = 'none';
 }
 
 async function canvasFromImageElement(file: File): Promise<HTMLCanvasElement> {
@@ -43,8 +58,8 @@ async function canvasFromImageElement(file: File): Promise<HTMLCanvasElement> {
     image.onerror = () => reject(new Error('No se pudo cargar la imagen seleccionada'));
     image.src = dataUrl;
   });
-  const maxSide = 2200;
-  const scale = Math.min(2, maxSide / Math.max(img.width, img.height, 1));
+  const maxSide = 3200;
+  const scale = Math.min(2.5, maxSide / Math.max(img.width, img.height, 1));
   const w = Math.max(1, Math.round(img.width * scale));
   const h = Math.max(1, Math.round(img.height * scale));
   const canvas = document.createElement('canvas');
@@ -52,42 +67,58 @@ async function canvasFromImageElement(file: File): Promise<HTMLCanvasElement> {
   canvas.height = h;
   const ctx = canvas.getContext('2d');
   if (!ctx) return canvas;
-  ctx.filter = 'grayscale(1) contrast(1.35) brightness(1.05)';
-  ctx.drawImage(img, 0, 0, w, h);
+  drawPreprocessed(ctx, img, w, h);
   return canvas;
 }
 
-async function preprocessImage(file: File): Promise<Blob> {
-  let canvas: HTMLCanvasElement | null = null;
+async function preprocessImage(file: File): Promise<HTMLCanvasElement> {
   if (typeof createImageBitmap === 'function') {
     try {
       const bitmap = await createImageBitmap(file);
-      const maxSide = 2200;
-      const scale = Math.min(2, maxSide / Math.max(bitmap.width, bitmap.height, 1));
+      const maxSide = 3200;
+      const scale = Math.min(2.5, maxSide / Math.max(bitmap.width, bitmap.height, 1));
       const w = Math.max(1, Math.round(bitmap.width * scale));
       const h = Math.max(1, Math.round(bitmap.height * scale));
-      canvas = document.createElement('canvas');
+      const canvas = document.createElement('canvas');
       canvas.width = w;
       canvas.height = h;
       const ctx = canvas.getContext('2d');
-      if (!ctx) {
+      if (ctx) {
+        drawPreprocessed(ctx, bitmap, w, h);
         bitmap.close();
-        return file;
+        return canvas;
       }
-      ctx.filter = 'grayscale(1) contrast(1.35) brightness(1.05)';
-      ctx.drawImage(bitmap, 0, 0, w, h);
       bitmap.close();
     } catch {
-      canvas = null;
+      /* fallback */
     }
   }
-  if (!canvas) {
-    canvas = await canvasFromImageElement(file);
+  return canvasFromImageElement(file);
+}
+
+async function recognizeWithModes(
+  worker: import('tesseract.js').Worker,
+  canvas: HTMLCanvasElement,
+  onProgress?: (p: CedulaOcrProgress) => void
+): Promise<string> {
+  const { PSM } = await import('tesseract.js');
+  const modes = [PSM.AUTO, PSM.SINGLE_BLOCK, PSM.SPARSE_TEXT] as const;
+  const chunks: string[] = [];
+
+  for (let i = 0; i < modes.length; i += 1) {
+    onProgress?.({
+      status: 'recognizing',
+      progress: 0.2 + (i / modes.length) * 0.65,
+      message: `Escaneando cédula (${i + 1}/${modes.length})…`,
+    });
+    await worker.setParameters({ tessedit_pageseg_mode: modes[i] });
+    const { data } = await worker.recognize(canvas);
+    const text = (data.text || '').trim();
+    if (text.length > 20) chunks.push(text);
   }
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return file;
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
-  return blob || file;
+
+  const merged = [...new Set(chunks)].join('\n');
+  return normalizeOcrRawText(merged);
 }
 
 export type CedulaOcrProgress = {
@@ -96,21 +127,35 @@ export type CedulaOcrProgress = {
   message: string;
 };
 
-/** OCR 100% offline (Tesseract WASM + spa embebido en /public/tesseract). */
+/** OCR offline (Tesseract WASM). Optimizado para cédula paraguaya en APK. */
 export async function scanCedulaFromFile(
   file: File | Blob,
   target: CedulaOcrTarget,
   onProgress?: (p: CedulaOcrProgress) => void
 ): Promise<CedulaOcrFields> {
-  onProgress?.({ status: 'loading', progress: 0.05, message: 'Preparando lectura offline…' });
+  onProgress?.({ status: 'loading', progress: 0.05, message: 'Preparando escáner…' });
   const worker = await getOcrWorker();
-  onProgress?.({ status: 'recognizing', progress: 0.15, message: 'Leyendo cédula…' });
   const asFile =
     file instanceof File ? file : new File([file], 'cedula.jpg', { type: 'image/jpeg' });
-  const image = await preprocessImage(asFile);
-  const { data } = await worker.recognize(image);
-  onProgress?.({ status: 'parsing', progress: 0.92, message: 'Extrayendo datos…' });
-  const parsed = parseCedulaOcrText(data.text || '', target);
+  const canvas = await preprocessImage(asFile);
+
+  const rawMerged = await recognizeWithModes(worker, canvas, onProgress);
+
+  onProgress?.({ status: 'parsing', progress: 0.92, message: 'Autocompletando datos…' });
+  const parsed = parseCedulaOcrText(rawMerged, target);
+
+  if (!rawMerged || rawMerged.replace(/\s/g, '').length < 12) {
+    throw new Error(
+      'No se leyó texto en la foto. Usá buena luz, encuadre la cédula completa y volvé a intentar.'
+    );
+  }
+
+  if (!hasUsefulCedulaData(parsed, target)) {
+    throw new Error(
+      'No se detectaron datos claros de la cédula. Acercá la foto, evitá reflejos y reintentá.'
+    );
+  }
+
   onProgress?.({ status: 'done', progress: 1, message: 'Listo' });
   return parsed;
 }

@@ -75,9 +75,10 @@ mustContain(
 );
 mustContain(
   path.join(root, 'src/components/mrv/CedulaOcrButtons.tsx'),
-  "openPicker(t, 'gallery')",
-  'OCR botón galería'
+  'Autocompletar',
+  'OCR flujo autocompletar'
 );
+mustContain(path.join(root, 'src/lib/cedula-ocr.ts'), 'recognizeWithModes', 'OCR escaneo multipaso');
 
 mustContain(path.join(root, 'src/service-worker.ts'), 'mrv-v38-web-offline', 'SW cache v38');
 mustContain(path.join(root, 'src/service-worker.ts'), '/tesseract/spa.traineddata.gz', 'SW precache OCR');

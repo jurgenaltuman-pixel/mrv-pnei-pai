@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, lazy, Suspense } from 'react';
 import { dataService, type PersonaBase } from '@/services/dataService';
 import { Search, Check, X, User, CreditCard } from 'lucide-react';
 import { esCodigoTemporal, validarFormatoCodigoTemporal } from '@/lib/temp-code-rve';
@@ -12,8 +12,8 @@ import { resolveSexoPersona } from '@/lib/persona-sexo';
 import { resolveFechaNacimientoPersona } from '@/lib/persona-fecha';
 import PadronSprHistorial from '@/components/mrv/PadronSprHistorial';
 import FechaInputPy from '@/components/mrv/FechaInputPy';
-import CedulaOcrButtons from '@/components/mrv/CedulaOcrButtons';
 import { useToast } from '@/hooks/use-toast';
+import { isNativeApp } from '@/lib/capacitor-platform';
 import RegistroClipAdjuntosSection from '@/components/mrv/RegistroClipAdjuntos';
 import {
   clipAdjuntosTienenDatos,
@@ -29,6 +29,8 @@ import {
   type PadronSearchStatus,
 } from '@/lib/padron-search-status';
 import type { CedulaOcrFields, CedulaOcrTarget } from '@/lib/cedula-ocr-parse';
+
+const CedulaOcrButtons = lazy(() => import('@/components/mrv/CedulaOcrButtons'));
 
 function personaToClipMeta(p: PersonaBase, tipoFallback: string): ClipNinoMeta {
   return {
@@ -228,9 +230,9 @@ export default function ChildDataSection(props: Props) {
     return historialSprSinDatos(historialSpr);
   }, [historialLoading, clipActivoMeta, props.documento, historialSpr]);
 
-  const buscarPorDocumento = useCallback(async () => {
+  const buscarPorDocumento = useCallback(async (docOverride?: string) => {
     if (props.visitaSinDatosNino) return;
-    const raw = docBusqueda.trim();
+    const raw = (docOverride ?? docBusqueda).trim();
     const soloDigitos = tipoDocumentoSoloDigitos(tipoDoc);
     const normalized = soloDigitos ? raw.replace(/\D/g, '') : raw.replace(/\s+/g, '').toUpperCase();
     const minLen = soloDigitos ? 4 : 3;
@@ -389,6 +391,7 @@ export default function ChildDataSection(props: Props) {
           props.setDocumento(fields.documento);
           setDocBusqueda(fields.documento);
           props.setSinDocumento(false);
+          void buscarPorDocumento(fields.documento);
         }
         if (fields.nombre) props.setNombre(upperText(fields.nombre));
         if (fields.fechaNacimiento) props.setFechaNacimiento(fields.fechaNacimiento);
@@ -422,7 +425,7 @@ export default function ChildDataSection(props: Props) {
         });
       }
     },
-    [props, toast]
+    [props, toast, buscarPorDocumento]
   );
 
   const listaSugerencias =
@@ -747,14 +750,16 @@ export default function ChildDataSection(props: Props) {
           </div>
         )}
 
-        {!props.visitaSinDatosNino && (
-          <CedulaOcrButtons
-            disabled={searching}
-            onResult={aplicarOcr}
-            onError={(msg) =>
-              toast({ title: 'No se pudo leer la cédula', description: msg, variant: 'destructive' })
-            }
-          />
+        {!props.visitaSinDatosNino && isNativeApp() && (
+          <Suspense fallback={null}>
+            <CedulaOcrButtons
+              disabled={searching}
+              onResult={aplicarOcr}
+              onError={(msg) =>
+                toast({ title: 'No se pudo leer la cédula', description: msg, variant: 'destructive' })
+              }
+            />
+          </Suspense>
         )}
 
         {!props.visitaSinDatosNino && mostrarAltaPadron && (
