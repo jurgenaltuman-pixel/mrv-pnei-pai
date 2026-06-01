@@ -7,6 +7,7 @@ import { clipStorageKey } from '@/lib/registro-clip-adjuntos';
 import { isPendingDriveUrl, pendingDriveUrl } from '@/lib/pending-drive-url';
 import { flushPendingDriveForClip, queueDriveImage } from '@/services/driveAdjuntosOfflineQueue';
 import { puedeGuardarClipDrive } from '@/lib/clip-upload-eligibility';
+import { isGoogleDriveNotConfiguredMessage } from '@/lib/drive-upload-errors';
 import { useToast } from '@/hooks/use-toast';
 
 const MAX_IMAGES = 2;
@@ -77,11 +78,37 @@ export default function RegistroClipAdjuntosSection({
     return urls;
   };
 
+  const guardarImagenesEnDispositivo = async (
+    images: { filename: string; mimeType: string; dataBase64: string }[],
+    enlace1In: string | undefined,
+    enlace2In: string | undefined
+  ) => {
+    let enlace1 = enlace1In;
+    let enlace2 = enlace2In;
+    const slots: ('enlace_imagen_1' | 'enlace_imagen_2')[] = ['enlace_imagen_1', 'enlace_imagen_2'];
+    let slotIdx = 0;
+    if (enlace1 && !isPendingDriveUrl(enlace1)) slotIdx = 1;
+    for (let i = 0; i < images.length && slotIdx < slots.length; i += 1) {
+      if (slots[slotIdx] === 'enlace_imagen_2' && enlace2 && !isPendingDriveUrl(enlace2)) break;
+      const id = await queueDriveImage({
+        clipKey,
+        documento: docRef,
+        tipoDocumento: meta.tipo,
+        nombre: nombreRef,
+        image: images[i],
+      });
+      if (slots[slotIdx] === 'enlace_imagen_1') enlace1 = pendingDriveUrl(id);
+      else enlace2 = pendingDriveUrl(id);
+      slotIdx += 1;
+    }
+    return { enlace1, enlace2 };
+  };
+
   const subir = async () => {
     if (!puedeSubir) {
       toast({
         title: 'Datos del niño/a',
-        description: 'Completá nombre (mín. 2 letras) y documento (mín. 4 caracteres) antes de subir.',
+        description: 'Completá el documento (mín. 4 caracteres) del niño/a antes de guardar.',
         variant: 'destructive',
       });
       return;
@@ -99,30 +126,33 @@ export default function RegistroClipAdjuntosSection({
       let enlace2 = adjuntos.enlace_imagen_2;
 
       if (isOnline) {
-        const urls = await subirOnline(images);
-        if (urls[0]) enlace1 = urls[0];
-        if (urls[1]) enlace2 = urls[1] || enlace2;
-        toast({
-          title: 'Guardado en Drive',
-          description: `Imágenes asociadas a ${meta.tipo} ${docRef}.`,
-        });
-      } else {
-        const slots: ('enlace_imagen_1' | 'enlace_imagen_2')[] = ['enlace_imagen_1', 'enlace_imagen_2'];
-        let slotIdx = 0;
-        if (enlace1 && !isPendingDriveUrl(enlace1)) slotIdx = 1;
-        for (let i = 0; i < images.length && slotIdx < slots.length; i += 1) {
-          if (slots[slotIdx] === 'enlace_imagen_2' && enlace2 && !isPendingDriveUrl(enlace2)) break;
-          const id = await queueDriveImage({
-            clipKey,
-            documento: docRef,
-            tipoDocumento: meta.tipo,
-            nombre: nombreRef,
-            image: images[i],
+        try {
+          const urls = await subirOnline(images);
+          if (urls[0]) enlace1 = urls[0];
+          if (urls[1]) enlace2 = urls[1] || enlace2;
+          toast({
+            title: 'Guardado en Drive',
+            description: `Imágenes asociadas a ${meta.tipo} ${docRef}.`,
           });
-          if (slots[slotIdx] === 'enlace_imagen_1') enlace1 = pendingDriveUrl(id);
-          else enlace2 = pendingDriveUrl(id);
-          slotIdx += 1;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (isGoogleDriveNotConfiguredMessage(msg)) {
+            const local = await guardarImagenesEnDispositivo(images, enlace1, enlace2);
+            enlace1 = local.enlace1;
+            enlace2 = local.enlace2;
+            toast({
+              title: 'Imágenes guardadas',
+              description:
+                'Quedaron en el registro de la visita. El servidor aún no tiene Drive configurado; se subirán cuando esté disponible.',
+            });
+          } else {
+            throw e;
+          }
         }
+      } else {
+        const local = await guardarImagenesEnDispositivo(images, enlace1, enlace2);
+        enlace1 = local.enlace1;
+        enlace2 = local.enlace2;
         toast({
           title: 'Guardado en el dispositivo',
           description: 'Sin conexión: las fotos se subirán a Drive al reconectar.',
@@ -342,7 +372,7 @@ export default function RegistroClipAdjuntosSection({
         className="h-9 w-full rounded-lg bg-[#0055A4] text-white text-[13px] font-bold flex items-center justify-center gap-2 disabled:opacity-50"
       >
         {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-        {isOnline ? 'Subir imágenes a Drive' : 'Guardar imágenes (subir al reconectar)'}
+        {isOnline ? 'Guardar imágenes' : 'Guardar imágenes (subir al reconectar)'}
       </button>
       {!puedeSubir && (
         <p className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5">

@@ -105,34 +105,30 @@ export function CampaignAppHeader({
             ) : null}
           </div>
 
-          <div className="flex flex-col items-end gap-1 shrink-0 row-span-2 sm:row-span-1 self-center">
-            <div className="flex flex-wrap justify-end gap-1">
-              {(pendingCount > 0 || pendingDriveCount > 0 || !isOnline) && (
-                <span
-                  className={`inline-flex rounded-lg px-1.5 py-0.5 text-[10px] font-bold border ${
-                    !isOnline
-                      ? 'bg-amber-100 text-amber-950 border-amber-200/80'
-                      : 'bg-amber-100 text-amber-950 border-amber-200/80'
-                  }`}
-                  title={
-                    !isOnline
-                      ? 'Sin conexión'
-                      : `${pendingCount} registro(s)${pendingDriveCount ? ` · ${pendingDriveCount} foto(s)` : ''} pendientes`
-                  }
-                >
-                  {!isOnline ? (
-                    <WifiOff className="w-3 h-3" aria-hidden />
-                  ) : (
-                    pendingCount + pendingDriveCount
-                  )}
-                </span>
-              )}
+          <div className="flex flex-col items-end gap-1.5 shrink-0 row-span-2 sm:row-span-1 self-center">
+            {(pendingCount > 0 || pendingDriveCount > 0 || !isOnline) && (
+              <span
+                className="inline-flex rounded-lg px-1.5 py-0.5 text-[10px] font-bold border bg-amber-100 text-amber-950 border-amber-200/80"
+                title={
+                  !isOnline
+                    ? 'Sin conexión'
+                    : `${pendingCount} registro(s)${pendingDriveCount ? ` · ${pendingDriveCount} foto(s)` : ''} pendientes`
+                }
+              >
+                {!isOnline ? (
+                  <WifiOff className="w-3 h-3" aria-hidden />
+                ) : (
+                  pendingCount + pendingDriveCount
+                )}
+              </span>
+            )}
+            <div className="flex flex-col items-stretch gap-1.5">
               {onSyncAll && (
                 <button
                   type="button"
                   disabled={syncing || !isOnline}
                   onClick={onSyncAll}
-                  className={`p-2.5 max-lg:p-3 rounded-xl border active:scale-[0.98] disabled:opacity-50 ${
+                  className={`h-10 w-10 rounded-xl border inline-flex items-center justify-center active:scale-[0.98] disabled:opacity-50 ${
                     pendingCount > 0 || pendingDriveCount > 0
                       ? 'text-white bg-[#0055A4] hover:bg-[#003d7a] border-sky-900/20'
                       : 'text-[#0c4a6e] bg-white/90 hover:bg-white border-sky-200/80'
@@ -140,42 +136,42 @@ export function CampaignAppHeader({
                   title={
                     pendingCount > 0 || pendingDriveCount > 0
                       ? 'Sincronizar registros y fotos pendientes'
-                      : 'Verificar sincronización'
+                      : 'Sincronizar'
                   }
                   aria-label="Sincronizar"
                 >
-                  <CloudUpload className={`w-4 h-4 max-lg:w-[1.15rem] max-lg:h-[1.15rem] ${syncing ? 'animate-pulse' : ''}`} />
+                  <CloudUpload className={`w-4 h-4 ${syncing ? 'animate-pulse' : ''}`} />
                 </button>
               )}
-              <ThemeToggle className="!p-2 max-lg:!p-2.5 !rounded-lg border-sky-200/80 dark:border-slate-600" />
+              <ThemeToggle className="!h-10 !w-10 !p-0 !rounded-xl border-sky-200/80 dark:border-slate-600" />
               <button
                 type="button"
                 onClick={() => void forceAppUpdate()}
-                className="p-2.5 max-lg:p-3 rounded-xl text-[#0c4a6e] bg-white/90 hover:bg-white border border-sky-200/80 active:scale-[0.98]"
+                className="h-10 w-10 rounded-xl text-[#0c4a6e] bg-white/90 hover:bg-white border border-sky-200/80 inline-flex items-center justify-center active:scale-[0.98]"
                 title={`Actualizar app (v${APP_BUILD_ID})`}
                 aria-label="Actualizar aplicación"
               >
-                <RefreshCw className="w-4 h-4 max-lg:w-[1.15rem] max-lg:h-[1.15rem]" />
+                <RefreshCw className="w-4 h-4" />
               </button>
               {pwaInstall?.canInstall && (
                 <button
                   type="button"
                   onClick={() => void pwaInstall.onInstall()}
-                  className="p-2.5 max-lg:p-3 rounded-xl text-white bg-emerald-700 hover:bg-emerald-800 border border-emerald-900/20 active:scale-[0.98]"
+                  className="h-10 w-10 rounded-xl text-white bg-emerald-700 hover:bg-emerald-800 border border-emerald-900/20 inline-flex items-center justify-center active:scale-[0.98]"
                   title="Instalar aplicación"
                   aria-label="Instalar aplicación"
                 >
-                  <Download className="w-4 h-4 max-lg:w-[1.15rem] max-lg:h-[1.15rem]" />
+                  <Download className="w-4 h-4" />
                 </button>
               )}
               <button
                 type="button"
                 onClick={onLogout}
-                className="flex items-center gap-1.5 text-xs max-lg:text-sm font-semibold text-white bg-[#0c4a6e] hover:bg-[#0a3d5c] px-2.5 py-2 max-lg:px-3 max-lg:py-2.5 sm:px-2.5 sm:py-2 rounded-xl shadow-sm border border-sky-900/20 active:scale-[0.98]"
+                className="h-10 w-10 rounded-xl text-white bg-[#0c4a6e] hover:bg-[#0a3d5c] inline-flex items-center justify-center shadow-sm border border-sky-900/20 active:scale-[0.98]"
                 aria-label="Cerrar sesión"
+                title="Salir"
               >
-                <LogOut className="w-3.5 h-3.5" />
-                <span className="hidden min-[420px]:inline">Salir</span>
+                <LogOut className="w-4 h-4" />
               </button>
             </div>
           </div>
