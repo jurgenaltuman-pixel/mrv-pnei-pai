@@ -1448,14 +1448,49 @@ export function createApp() {
     try {
       await ensureRoundHistoryTable();
       const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
+      const clauses = ['h.user_id = $1'];
+      const params = [req.user.sub];
+      let idx = 2;
+      const region = String(req.query.region || '').trim();
+      const distrito = String(req.query.distrito || '').trim();
+      const servicio = String(req.query.servicio || '').trim();
+      const responsable = String(req.query.responsable || '').trim();
+      const roundCodigo = String(req.query.round_codigo || '').trim();
+      if (region) {
+        clauses.push(`COALESCE(h.assigned_region, p.assigned_region) ILIKE $${idx++}`);
+        params.push(`%${region}%`);
+      }
+      if (distrito) {
+        clauses.push(
+          `(COALESCE(h.assigned_distrito, p.assigned_distrito) ILIKE $${idx} OR h.barrio ILIKE $${idx} OR h.modulo_label ILIKE $${idx})`
+        );
+        params.push(`%${distrito}%`);
+        idx++;
+      }
+      if (servicio) {
+        clauses.push(`COALESCE(h.assigned_servicio, p.assigned_servicio) ILIKE $${idx++}`);
+        params.push(`%${servicio}%`);
+      }
+      if (responsable) {
+        clauses.push(
+          `(h.responsable ILIKE $${idx} OR h.entrevistador ILIKE $${idx} OR p.display_name ILIKE $${idx})`
+        );
+        params.push(`%${responsable}%`);
+        idx++;
+      }
+      if (roundCodigo) {
+        clauses.push(`h.round_codigo ILIKE $${idx++}`);
+        params.push(`%${roundCodigo}%`);
+      }
+      params.push(limit);
       const { rows } = await query(
         `SELECT ${ROUND_HISTORY_LIST_SQL}, p.display_name, p.email
          FROM round_monitoring_history h
          LEFT JOIN profiles p ON p.user_id = h.user_id
-         WHERE h.user_id = $1
+         WHERE ${clauses.join(' AND ')}
          ORDER BY h.completada_at DESC
-         LIMIT $2`,
-        [req.user.sub, limit]
+         LIMIT $${idx}`,
+        params
       );
       res.json({ data: rows.map(mapRoundHistoryRow) });
     } catch (e) {
@@ -1546,8 +1581,11 @@ export function createApp() {
         params.push(`%${region}%`);
       }
       if (distrito) {
-        clauses.push(`COALESCE(h.assigned_distrito, p.assigned_distrito) ILIKE $${idx++}`);
+        clauses.push(
+          `(COALESCE(h.assigned_distrito, p.assigned_distrito) ILIKE $${idx} OR h.barrio ILIKE $${idx} OR h.modulo_label ILIKE $${idx})`
+        );
         params.push(`%${distrito}%`);
+        idx++;
       }
       if (servicio) {
         clauses.push(`COALESCE(h.assigned_servicio, p.assigned_servicio) ILIKE $${idx++}`);

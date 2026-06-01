@@ -87,10 +87,24 @@ export async function fetchRoundHistoryDetail(
   return { data: data?.data ?? null, error: null };
 }
 
-export async function fetchMyRoundHistory(limit = 40): Promise<RoundHistoryRow[]> {
+export async function fetchMyRoundHistory(filters?: {
+  region?: string;
+  distrito?: string;
+  servicio?: string;
+  responsable?: string;
+  roundCodigo?: string;
+  limit?: number;
+}): Promise<RoundHistoryRow[]> {
   if (!USE_MRV_API) return [];
+  const q = new URLSearchParams();
+  q.set('limit', String(filters?.limit ?? 40));
+  if (filters?.region) q.set('region', filters.region);
+  if (filters?.distrito) q.set('distrito', filters.distrito);
+  if (filters?.servicio) q.set('servicio', filters.servicio);
+  if (filters?.responsable) q.set('responsable', filters.responsable);
+  if (filters?.roundCodigo) q.set('round_codigo', filters.roundCodigo);
   const { data, error } = await mrvApiFetch<{ data: RoundHistoryRow[] }>(
-    `/api/rounds/history?limit=${Math.min(50, Math.max(1, limit))}`
+    `/api/rounds/history?${q.toString()}`
   );
   if (error || !data?.data) return [];
   return data.data;

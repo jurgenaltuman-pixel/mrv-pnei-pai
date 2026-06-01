@@ -61,7 +61,10 @@ export default function RoundHistoryPanel({
     try {
       const data = useAdminList
         ? await fetchAdminRoundHistory(effectiveFilters)
-        : await fetchMyRoundHistory(effectiveFilters.limit);
+        : await fetchMyRoundHistory({
+            limit: effectiveFilters.limit,
+            roundCodigo: effectiveFilters.roundCodigo,
+          });
       setRows(data);
       setLoaded(true);
     } catch (e) {
@@ -82,6 +85,21 @@ export default function RoundHistoryPanel({
     initialLoadDone.current = true;
     void load();
   }, [lazy, load]);
+
+  useEffect(() => {
+    if (!loaded || !expanded || lazy) return;
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- recargar al cambiar filtros
+  }, [
+    loaded,
+    expanded,
+    lazy,
+    effectiveFilters.region,
+    effectiveFilters.distrito,
+    effectiveFilters.servicio,
+    effectiveFilters.responsable,
+    effectiveFilters.roundCodigo,
+  ]);
 
   const roundsByServicio = useMemo(() => aggregateRoundsByServicio(rows), [rows]);
 

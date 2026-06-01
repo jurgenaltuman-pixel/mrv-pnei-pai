@@ -20,7 +20,7 @@ import {
   deltaContadorPorEstadoCasa,
   evaluateRoundMonitoring,
 } from '@/lib/round-evaluation';
-import { dismissRound, rondaIncompleta, undismissRound } from '@/lib/round-resume';
+import { dismissRound, rondaCompletada, rondaIncompleta, undismissRound } from '@/lib/round-resume';
 import { crearRondaVacia, roundMonitoringStorage } from '@/services/roundMonitoringStorage';
 import { applySyncIdsToCasa, syncCasaActualizada, syncCasaGuardada } from '@/services/roundMonitoringSync';
 import { ensureRoundCodigo } from '@/lib/round-codigo';
@@ -87,6 +87,7 @@ function equipoToRoundFields(equipo: EquipoMiembro[]) {
 }
 
 function normalizarRondaParaMetaEfectivas(r: RoundMonitoring): RoundMonitoring {
+  if (rondaCompletada(r)) return r;
   const efectivas = countCasasEfectivas(r.casas);
   if (efectivas >= r.totalCasas) return r;
 
@@ -161,12 +162,19 @@ export default function RoundMonitoringFlow({
   const applyEquipoFromRound = useCallback((r: RoundMonitoring) => {
     const ids = r.colaboradorUserIds || [];
     const names = r.colaboradores || [];
-    const members: EquipoMiembro[] = names.map((display_name, i) => ({
-      user_id: ids[i] || `legacy-${i}-${display_name}`,
-      display_name,
-    }));
-    setEquipoUsuarios(members);
-  }, []);
+    const members: EquipoMiembro[] = ids.length
+      ? ids.map((user_id, i) => ({
+          user_id: String(user_id),
+          display_name: String(names[i] || '').trim() || String(user_id),
+        }))
+      : names.map((display_name, i) => ({
+          user_id: `legacy-${i}-${display_name}`,
+          display_name,
+        }));
+    setEquipoUsuarios(
+      members.filter((m) => m.display_name && m.display_name !== entrevistadorNombre)
+    );
+  }, [entrevistadorNombre]);
 
   const refreshActiveDrafts = useCallback(async () => {
     const drafts = await roundMonitoringStorage.listActiveDraftsForUser(userId);
@@ -185,7 +193,7 @@ export default function RoundMonitoringFlow({
     void (async () => {
       const rows = await roundMonitoringStorage.listByUser(userId, 30);
       const target = rows.find((r) => r.id === resumeRoundId);
-      if (!target) return;
+      if (!target || rondaCompletada(target)) return;
       undismissRound(userId, target.id);
       const r = normalizarRondaParaMetaEfectivas(target);
       setRound(r);
@@ -313,6 +321,7 @@ export default function RoundMonitoringFlow({
   );
 
   const handleRecoverRound = (r: RoundMonitoring) => {
+    if (rondaCompletada(r)) return;
     undismissRound(userId, r.id);
     setSavedRound(r);
     setRecoverableRounds((prev) => prev.filter((x) => x.id !== r.id));
@@ -325,7 +334,7 @@ export default function RoundMonitoringFlow({
   };
 
   const handleContinueRound = () => {
-    if (!savedRound) return;
+    if (!savedRound || rondaCompletada(savedRound)) return;
     undismissRound(userId, savedRound.id);
     const r = normalizarRondaParaMetaEfectivas(savedRound);
     setRound(r);
@@ -717,6 +726,8 @@ export default function RoundMonitoringFlow({
       item,
       snapshot: { round: roundHist, summary, evaluation },
     });
+    dismissRound(userId, round.id);
+    void deleteRoundDraftOnServer(round.id);
     notifyJornada(stats);
     setRondaRegistrada(true);
   }, [round, summary, evaluation, rondaRegistrada, userId, notifyJornada, aplicarUbicacionARonda]);
@@ -762,8 +773,16 @@ export default function RoundMonitoringFlow({
           onToggleEquipo={(m) => {
             setEquipoUsuarios((prev) => {
               const on = prev.some((x) => x.user_id === m.user_id);
-              if (on) return prev.filter((x) => x.user_id !== m.user_id);
-              return [...prev, m];
+              const next = on ? prev.filter((x) => x.user_id !== m.user_id) : [...prev, m];
+              if (round && round.fase !== 'start') {
+                const eq = equipoToRoundFields(next);
+                void persist({
+                  ...round,
+                  colaboradores: eq.colaboradores,
+                  colaboradorUserIds: eq.colaboradorUserIds,
+                });
+              }
+              return next;
             });
           }}
           onStart={() => void handleStart()}

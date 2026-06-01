@@ -636,7 +636,7 @@ export default function DashboardView() {
 
       {dashTab === 'rondas' && (
         <RoundHistoryPanel
-          lazy
+          lazy={false}
           adminMode={isAdmin || isSuperAdmin}
           useAdminList={verReportesAmpliados}
           groupByUser={verReportesAmpliados && usarVistaNacional && canViewNationalReports}

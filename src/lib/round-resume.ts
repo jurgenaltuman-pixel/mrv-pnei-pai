@@ -1,9 +1,18 @@
+import { countCasasEfectivas } from '@/lib/croquis-housing';
 import type { RoundMonitoring } from '@/types/round-monitoring';
 
 const dismissKey = (userId: string) => `mrv_round_dismissed_${userId}`;
 
+/** Meta de efectivas alcanzada y ronda cerrada en resumen. */
+export function rondaCompletada(round: RoundMonitoring): boolean {
+  const efectivas = countCasasEfectivas(round.casas);
+  if (efectivas < round.totalCasas) return false;
+  return round.fase === 'summary' || round.completedAt != null;
+}
+
 /** Ronda guardada que el usuario puede retomar (no quedó en pantalla de inicio vacía). */
 export function isRoundResumable(round: RoundMonitoring): boolean {
+  if (rondaCompletada(round)) return false;
   return round.fase !== 'start';
 }
 
@@ -50,6 +59,5 @@ export function clearAllDismissedRounds(userId: string): void {
 
 /** Ronda incompleta (meta de efectivas no alcanzada). */
 export function rondaIncompleta(round: RoundMonitoring): boolean {
-  const efectivas = round.casas.filter((c) => c.guardada && c.estado === 'E').length;
-  return efectivas < round.totalCasas;
+  return !rondaCompletada(round) && countCasasEfectivas(round.casas) < round.totalCasas;
 }

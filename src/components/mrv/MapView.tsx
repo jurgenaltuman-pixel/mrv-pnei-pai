@@ -2,9 +2,14 @@ import { lazy, Suspense, useMemo, useState } from 'react';
 import { useRegistrosQuery } from '@/hooks/useRegistrosQuery';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGeolocation } from '@/hooks/useGeolocation';
+import { useProfileScope } from '@/hooks/useProfileScope';
 import { MapSkeleton } from '@/components/mrv/PageSkeleton';
 import VisitaMapFilterBar from '@/components/mrv/VisitaMapFilterBar';
 import { filterRegistrosByVisita, type VisitaMapFilter } from '@/lib/visita-filter';
+import {
+  filterRegistrosByProfileScope,
+  hasProfileScopeAssignment,
+} from '@/lib/registro-scope';
 import { MapPin, Navigation, RefreshCw } from 'lucide-react';
 
 const MrvMapPanel = lazy(() => import('@/components/mrv/MrvMapPanel'));
@@ -12,12 +17,20 @@ const MrvMapPanel = lazy(() => import('@/components/mrv/MrvMapPanel'));
 export default function MapView() {
   const { user } = useAuth();
   const geo = useGeolocation();
+  const { data: profileScope } = useProfileScope();
   const { data: registros = [], isLoading, isFetching, refetch } = useRegistrosQuery(2500, Boolean(user?.id));
   const [filtro, setFiltro] = useState<VisitaMapFilter>('todos');
 
+  const registrosVisibles = useMemo(() => {
+    if (hasProfileScopeAssignment(profileScope)) {
+      return filterRegistrosByProfileScope(registros, profileScope);
+    }
+    return registros;
+  }, [registros, profileScope]);
+
   const filtrados = useMemo(
-    () => filterRegistrosByVisita(registros, filtro),
-    [registros, filtro]
+    () => filterRegistrosByVisita(registrosVisibles, filtro),
+    [registrosVisibles, filtro]
   );
 
   const geoCount = filtrados.filter((r) => r.latitud != null && r.longitud != null).length;
@@ -35,6 +48,9 @@ export default function MapView() {
           </h2>
           <p className="text-xs text-muted-foreground">
             {geoCount} con GPS · {sinGps} sin ubicación · OpenStreetMap (gratis)
+            {hasProfileScopeAssignment(profileScope) && profileScope?.assigned_distrito
+              ? ` · ${profileScope.assigned_distrito}`
+              : ''}
           </p>
         </div>
         <div className="flex gap-1.5">

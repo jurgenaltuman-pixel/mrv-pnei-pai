@@ -167,7 +167,13 @@ export default function MainApp() {
       setSyncingOffline(true);
       try {
         const r = await syncAllOfflineData(isOnline);
-        if (!silent || r.registrosSynced > 0 || r.driveUploaded > 0 || !r.allSynced) {
+        const shouldToast =
+          !silent ||
+          !r.ok ||
+          (!r.allSynced && r.totalPending > 0) ||
+          r.registrosSynced > 0 ||
+          r.driveUploaded > 0;
+        if (shouldToast) {
           toast({
             title: r.allSynced ? 'Todo sincronizado' : r.ok ? 'Sincronización' : 'Sin conexión',
             description: r.message,
