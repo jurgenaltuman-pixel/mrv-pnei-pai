@@ -1,218 +1,172 @@
 import { Bar, Doughnut } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement } from 'chart.js';
 import type { DashboardData } from '@/services/dataService';
-import type { RoundServicioStats } from '@/lib/round-dashboard-stats';
+import { barChartOptions, barDataset, doughnutChartOptions, MRV_CHART } from '@/lib/chart-theme';
 
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement);
-
-const lightChartOpts = {
-  responsive: true,
-  maintainAspectRatio: false,
-  animation: { duration: 280 },
-  plugins: {
-    legend: { position: 'bottom' as const, labels: { boxWidth: 10, font: { size: 10 }, padding: 8 } },
-  },
-};
 
 interface Props {
   data: DashboardData;
   chartMode: 'stacked' | 'coverage';
-  roundsByServicio?: RoundServicioStats[];
 }
 
 function topEntries(map: Record<string, { vacunados: number; noVacunados: number }> | undefined, n = 8) {
   return Object.entries(map || {})
     .map(([name, values]) => ({ name, ...values, total: values.vacunados + values.noVacunados }))
+    .filter((e) => e.total > 0)
     .sort((a, b) => b.total - a.total)
     .slice(0, n);
 }
 
-export default function DashboardCharts({ data, chartMode, roundsByServicio = [] }: Props) {
+function truncateLabel(name: string, max = 22): string {
+  return name.length > max ? `${name.slice(0, max - 1)}…` : name;
+}
+
+function VacunacionBarChart({
+  title,
+  entries,
+  chartMode,
+  horizontal = false,
+  coverageColor = MRV_CHART.primary,
+}: {
+  title: string;
+  entries: ReturnType<typeof topEntries>;
+  chartMode: 'stacked' | 'coverage';
+  horizontal?: boolean;
+  coverageColor?: string;
+}) {
+  if (!entries.length) return null;
+  const labels = entries.map((d) => truncateLabel(d.name, horizontal ? 32 : 18));
+
+  return (
+    <div className="dash-card p-4 overflow-hidden">
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <h3 className="text-sm font-bold">{title}</h3>
+        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+          {chartMode === 'stacked' ? 'Apilado' : 'Cobertura %'}
+        </span>
+      </div>
+      <div className={horizontal ? 'h-56' : 'h-52'}>
+        <Bar
+          data={{
+            labels,
+            datasets:
+              chartMode === 'stacked'
+                ? [
+                    barDataset(
+                      'Vacunados',
+                      entries.map((d) => d.vacunados),
+                      MRV_CHART.vacunado,
+                      MRV_CHART.vacunadoSoft
+                    ),
+                    barDataset(
+                      'No vacunados',
+                      entries.map((d) => d.noVacunados),
+                      MRV_CHART.noVacunado,
+                      MRV_CHART.noVacunadoSoft
+                    ),
+                  ]
+                : [
+                    barDataset(
+                      'Cobertura %',
+                      entries.map((d) =>
+                        d.total > 0 ? Number(((d.vacunados / d.total) * 100).toFixed(1)) : 0
+                      ),
+                      coverageColor,
+                      MRV_CHART.primarySoft
+                    ),
+                  ],
+          }}
+          options={barChartOptions({
+            stacked: chartMode === 'stacked',
+            horizontal,
+            max: chartMode === 'coverage' ? 100 : undefined,
+          })}
+        />
+      </div>
+    </div>
+  );
+}
+
+export default function DashboardCharts({ data, chartMode }: Props) {
   const distritos = topEntries(data.porDistrito);
   const responsables = topEntries(data.porResponsable);
   const servicios = topEntries(data.porServicio);
   const barrios = topEntries(data.porBarrio);
+  const totalVac = data.totalVacunados + data.totalNoVacunados;
 
   return (
-    <>
+    <div className="space-y-3">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div className="dash-card p-4">
-          <h3 className="text-sm font-bold mb-3">Estado de vacunación</h3>
-          <div className="h-44">
+          <h3 className="text-sm font-bold mb-1">Estado de vacunación</h3>
+          <p className="text-[10px] text-muted-foreground mb-3">Solo casas efectivas (E)</p>
+          <div className="h-48">
             <Doughnut
               data={{
                 labels: ['Vacunados', 'No vacunados'],
-                datasets: [{
-                  data: [data.totalVacunados, data.totalNoVacunados],
-                  backgroundColor: ['hsl(152 60% 38%)', 'hsl(0 72% 51%)'],
-                  borderWidth: 0,
-                }],
+                datasets: [
+                  {
+                    data: [data.totalVacunados, data.totalNoVacunados],
+                    backgroundColor: [MRV_CHART.vacunado, MRV_CHART.noVacunado],
+                    borderWidth: 2,
+                    borderColor: '#ffffff',
+                    hoverOffset: 6,
+                  },
+                ],
               }}
-              options={lightChartOpts}
+              options={doughnutChartOptions}
             />
           </div>
+          {totalVac > 0 && (
+            <p className="text-center text-xs font-bold text-primary mt-1">
+              {((data.totalVacunados / totalVac) * 100).toFixed(1)}% cobertura
+            </p>
+          )}
         </div>
         <div className="dash-card p-4">
-          <h3 className="text-sm font-bold mb-3">Esquema CVS</h3>
-          <div className="h-44">
+          <h3 className="text-sm font-bold mb-1">Esquema CVS</h3>
+          <p className="text-[10px] text-muted-foreground mb-3">Completitud del esquema</p>
+          <div className="h-48">
             <Doughnut
               data={{
                 labels: ['Completo', 'Incompleto'],
-                datasets: [{
-                  data: [data.esquema?.completo || 0, data.esquema?.incompleto || 0],
-                  backgroundColor: ['hsl(210 100% 32%)', 'hsl(38 92% 50%)'],
-                  borderWidth: 0,
-                }],
+                datasets: [
+                  {
+                    data: [data.esquema?.completo || 0, data.esquema?.incompleto || 0],
+                    backgroundColor: [MRV_CHART.primary, MRV_CHART.accent],
+                    borderWidth: 2,
+                    borderColor: '#ffffff',
+                    hoverOffset: 6,
+                  },
+                ],
               }}
-              options={lightChartOpts}
+              options={doughnutChartOptions}
             />
           </div>
         </div>
       </div>
-      {distritos.length > 0 && (
-        <div className="dash-card p-4">
-          <h3 className="text-sm font-bold mb-3">Por distrito</h3>
-          <Bar
-            data={{
-              labels: distritos.map((d) => d.name),
-              datasets:
-                chartMode === 'stacked'
-                  ? [
-                      { label: 'Vacunados', data: distritos.map((d) => d.vacunados), backgroundColor: 'hsl(152 60% 38%)' },
-                      { label: 'No vacunados', data: distritos.map((d) => d.noVacunados), backgroundColor: 'hsl(0 72% 51%)' },
-                    ]
-                  : [
-                      {
-                        label: 'Cobertura %',
-                        data: distritos.map((d) => (d.total > 0 ? Number(((d.vacunados / d.total) * 100).toFixed(1)) : 0)),
-                        backgroundColor: 'hsl(210 100% 32%)',
-                      },
-                    ],
-            }}
-            options={{
-              responsive: true,
-              plugins: { legend: { position: 'bottom' } },
-              scales: {
-                x: { stacked: chartMode === 'stacked' },
-                y: { stacked: chartMode === 'stacked', beginAtZero: true, max: chartMode === 'coverage' ? 100 : undefined },
-              },
-            }}
-          />
-        </div>
-      )}
-      {servicios.length > 0 && (
-        <div className="dash-card p-4">
-          <h3 className="text-sm font-bold mb-3">Por servicio de salud</h3>
-          <Bar
-            data={{
-              labels: servicios.map((d) => d.name),
-              datasets:
-                chartMode === 'stacked'
-                  ? [
-                      { label: 'Vacunados', data: servicios.map((d) => d.vacunados), backgroundColor: 'hsl(152 60% 38%)' },
-                      { label: 'No vacunados', data: servicios.map((d) => d.noVacunados), backgroundColor: 'hsl(0 72% 51%)' },
-                    ]
-                  : [
-                      {
-                        label: 'Cobertura %',
-                        data: servicios.map((d) => (d.total > 0 ? Number(((d.vacunados / d.total) * 100).toFixed(1)) : 0)),
-                        backgroundColor: 'hsl(210 100% 32%)',
-                      },
-                    ],
-            }}
-            options={{
-              responsive: true,
-              plugins: { legend: { position: 'bottom' } },
-              scales: {
-                x: { stacked: chartMode === 'stacked' },
-                y: { stacked: chartMode === 'stacked', beginAtZero: true, max: chartMode === 'coverage' ? 100 : undefined },
-              },
-            }}
-          />
-        </div>
-      )}
-      {barrios.length > 0 && (
-        <div className="dash-card p-4">
-          <h3 className="text-sm font-bold mb-3">Por barrio</h3>
-          <Bar
-            data={{
-              labels: barrios.map((d) => d.name),
-              datasets:
-                chartMode === 'stacked'
-                  ? [
-                      { label: 'Vacunados', data: barrios.map((d) => d.vacunados), backgroundColor: 'hsl(152 60% 38%)' },
-                      { label: 'No vacunados', data: barrios.map((d) => d.noVacunados), backgroundColor: 'hsl(0 72% 51%)' },
-                    ]
-                  : [
-                      {
-                        label: 'Cobertura %',
-                        data: barrios.map((d) => (d.total > 0 ? Number(((d.vacunados / d.total) * 100).toFixed(1)) : 0)),
-                        backgroundColor: 'hsl(38 92% 50%)',
-                      },
-                    ],
-            }}
-            options={{
-              responsive: true,
-              plugins: { legend: { position: 'bottom' } },
-              scales: {
-                x: { stacked: chartMode === 'stacked' },
-                y: { stacked: chartMode === 'stacked', beginAtZero: true, max: chartMode === 'coverage' ? 100 : undefined },
-              },
-            }}
-          />
-        </div>
-      )}
-      {responsables.length > 0 && (
-        <div className="dash-card p-4">
-          <h3 className="text-sm font-bold mb-3">Por responsable</h3>
-          <Bar
-            data={{
-              labels: responsables.map((d) => d.name),
-              datasets:
-                chartMode === 'stacked'
-                  ? [
-                      { label: 'Vacunados', data: responsables.map((d) => d.vacunados), backgroundColor: 'hsl(152 60% 38%)' },
-                      { label: 'No vacunados', data: responsables.map((d) => d.noVacunados), backgroundColor: 'hsl(0 72% 51%)' },
-                    ]
-                  : [
-                      {
-                        label: 'Cobertura %',
-                        data: responsables.map((d) => (d.total > 0 ? Number(((d.vacunados / d.total) * 100).toFixed(1)) : 0)),
-                        backgroundColor: 'hsl(210 100% 32%)',
-                      },
-                    ],
-            }}
-            options={{
-              responsive: true,
-              plugins: { legend: { position: 'bottom' } },
-              scales: {
-                x: { stacked: chartMode === 'stacked' },
-                y: { stacked: chartMode === 'stacked', beginAtZero: true, max: chartMode === 'coverage' ? 100 : undefined },
-              },
-            }}
-          />
-        </div>
-      )}
-      {roundsByServicio.length > 0 && (
-        <div className="dash-card p-4">
-          <h3 className="text-sm font-bold mb-3">Rondas de monitoreo por servicio</h3>
-          <Bar
-            data={{
-              labels: roundsByServicio.map((r) => r.servicio),
-              datasets: [
-                { label: 'Rondas completadas', data: roundsByServicio.map((r) => r.rondas), backgroundColor: 'hsl(210 100% 32%)' },
-                { label: 'Aprobadas', data: roundsByServicio.map((r) => r.aprobadas), backgroundColor: 'hsl(152 60% 38%)' },
-                { label: 'Niños vacunados', data: roundsByServicio.map((r) => r.vacunados), backgroundColor: 'hsl(38 92% 50%)' },
-              ],
-            }}
-            options={{
-              responsive: true,
-              plugins: { legend: { position: 'bottom' } },
-              scales: { y: { beginAtZero: true } },
-            }}
-          />
-        </div>
-      )}
-    </>
+
+      <VacunacionBarChart title="Por distrito" entries={distritos} chartMode={chartMode} />
+      <VacunacionBarChart
+        title="Por servicio de salud"
+        entries={servicios}
+        chartMode={chartMode}
+        horizontal={servicios.length > 4}
+      />
+      <VacunacionBarChart
+        title="Por barrio"
+        entries={barrios}
+        chartMode={chartMode}
+        horizontal
+        coverageColor={MRV_CHART.accent}
+      />
+      <VacunacionBarChart
+        title="Por responsable"
+        entries={responsables}
+        chartMode={chartMode}
+        horizontal
+      />
+    </div>
   );
 }

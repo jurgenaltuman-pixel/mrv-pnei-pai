@@ -14,13 +14,7 @@ import { useRole } from '@/hooks/useRole';
 import { useRegistrosQuery } from '@/hooks/useRegistrosQuery';
 import { buildDashboardData } from '@/lib/dashboard-stats';
 import { filterRegistrosByVisita, type VisitaMapFilter } from '@/lib/visita-filter';
-import { aggregateRoundsByServicio } from '@/lib/round-dashboard-stats';
-import {
-  fetchAdminRoundHistory,
-  fetchMyRoundHistory,
-  type RoundHistoryRow,
-} from '@/services/roundHistoryApi';
-import RoundHistoryAccordion from '@/components/mrv/RoundHistoryAccordion';
+import RoundHistoryPanel from '@/components/mrv/RoundHistoryPanel';
 import { contadorDesdeDashboard } from '@/lib/housing-stats';
 import HousingStatsPanel from '@/components/mrv/HousingStatsPanel';
 import type { DashboardData, RegistroMRV } from '@/services/dataService';
@@ -121,11 +115,10 @@ export default function DashboardView() {
   const [roundCodigoFilter, setRoundCodigoFilter] = useState('');
   const [chartMode, setChartMode] = useState<'stacked' | 'coverage'>('stacked');
   const [visitaMapFilter, setVisitaMapFilter] = useState<VisitaMapFilter>('todos');
-  const [roundHistoryRows, setRoundHistoryRows] = useState<RoundHistoryRow[]>([]);
+  const [dashTab, setDashTab] = useState<'resumen' | 'graficos' | 'rondas'>('resumen');
   const [exporting, setExporting] = useState(false);
   const assignmentFiltersApplied = useRef(false);
   const [jornadaStats, setJornadaStats] = useState(() => getJornadaStats(''));
-  const [roundsByServicio, setRoundsByServicio] = useState<ReturnType<typeof aggregateRoundsByServicio>>([]);
 
   const refreshJornada = useCallback(() => {
     if (!user?.id) return;
@@ -147,34 +140,6 @@ export default function DashboardView() {
     if (serv) setServicioFilter(serv);
     assignmentFiltersApplied.current = true;
   }, [profileScope]);
-
-  useEffect(() => {
-    if (!user?.id) return;
-    void (async () => {
-      const roundFilters = verReportesAmpliados
-          ? {
-              region: regionFilter !== 'todas' ? regionFilter : undefined,
-              distrito: distritoFilter !== 'todos' ? distritoFilter : undefined,
-              servicio: servicioFilter !== 'todos' && servicioFilter !== '_sin_servicio' ? servicioFilter : undefined,
-              responsable: responsableFilter !== 'todos' ? responsableFilter : undefined,
-              roundCodigo: roundCodigoFilter.trim() || undefined,
-            }
-          : undefined;
-      const rows = verReportesAmpliados
-          ? await fetchAdminRoundHistory(roundFilters)
-          : await fetchMyRoundHistory();
-      setRoundHistoryRows(rows);
-      setRoundsByServicio(aggregateRoundsByServicio(rows));
-    })();
-  }, [
-    user?.id,
-    verReportesAmpliados,
-    regionFilter,
-    distritoFilter,
-    servicioFilter,
-    responsableFilter,
-    roundCodigoFilter,
-  ]);
 
   useEffect(() => {
     const onVisible = () => {
@@ -322,6 +287,26 @@ export default function DashboardView() {
     visitaMapFilter,
     roundCodigoFilter,
   ]);
+
+  const roundHistoryFilters = useMemo(
+    () => ({
+      region: regionFilter !== 'todas' ? regionFilter : undefined,
+      distrito: distritoFilter !== 'todos' ? distritoFilter : undefined,
+      servicio:
+        servicioFilter !== 'todos' && servicioFilter !== '_sin_servicio' ? servicioFilter : undefined,
+      responsable: responsableFilter !== 'todos' ? responsableFilter : undefined,
+      roundCodigo: roundCodigoFilter.trim() || undefined,
+      limit: verReportesAmpliados ? 120 : 40,
+    }),
+    [
+      regionFilter,
+      distritoFilter,
+      servicioFilter,
+      responsableFilter,
+      roundCodigoFilter,
+      verReportesAmpliados,
+    ]
+  );
 
   if (isLoading) return <PageSkeleton rows={5} />;
 
@@ -576,6 +561,29 @@ export default function DashboardView() {
         </select>
       </div>
 
+      <div className="flex gap-1 p-1 rounded-xl bg-muted/60 border">
+        {(
+          [
+            { id: 'resumen' as const, label: 'Resumen' },
+            { id: 'graficos' as const, label: 'Gráficos' },
+            { id: 'rondas' as const, label: 'Monitoreos' },
+          ] as const
+        ).map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setDashTab(t.id)}
+            className={`flex-1 h-9 rounded-lg text-xs font-bold transition-colors ${
+              dashTab === t.id ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-card'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {dashTab === 'resumen' && (
+        <>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <KpiCard label="Vacunados" value={data.totalVacunados} icon={Syringe} tone="success" />
         <KpiCard label="No vacunados" value={data.totalNoVacunados} icon={XCircle} tone="danger" />
@@ -610,33 +618,32 @@ export default function DashboardView() {
           </p>
         )}
       </div>
-
-      {total === 0 ? (
-        <div className="dash-card text-center py-12 text-muted-foreground space-y-2">
-          <BarChart3 className="w-12 h-12 mx-auto mb-2 opacity-40" />
-          <p className="font-semibold">Sin registros con estos filtros</p>
-          <p className="text-xs px-4">
-            {registrosVisibles.length === 0
-              ? isLoading
-                ? 'Cargando…'
-                : 'No hay datos en el servidor para tu usuario/ámbito. Si sos admin, activá «Ver todos los registros» o revisá tu asignación en perfil.'
-              : `Hay ${registrosVisibles.length} registros en el ámbito; ampliá el período o quitá filtros de región, distrito o servicio.`}
-          </p>
-        </div>
-      ) : (
-        <Suspense fallback={<PageSkeleton rows={2} />}>
-          <DashboardCharts data={data} chartMode={chartMode} roundsByServicio={roundsByServicio} />
-        </Suspense>
+        </>
       )}
 
-      {roundHistoryRows.length > 0 && (
-        <div className="dash-card p-4">
-          <RoundHistoryAccordion
-            rows={roundHistoryRows}
-            groupByUser={usarVistaNacional && canViewNationalReports}
-            title="Historial de rondas (servidor)"
-          />
-        </div>
+      {dashTab === 'graficos' && (
+        total === 0 ? (
+          <div className="dash-card text-center py-12 text-muted-foreground">
+            <BarChart3 className="w-12 h-12 mx-auto mb-2 opacity-40" />
+            <p className="font-semibold">Sin datos para gráficos</p>
+          </div>
+        ) : (
+          <Suspense fallback={<PageSkeleton rows={2} />}>
+            <DashboardCharts data={data} chartMode={chartMode} />
+          </Suspense>
+        )
+      )}
+
+      {dashTab === 'rondas' && (
+        <RoundHistoryPanel
+          lazy
+          adminMode={isAdmin || isSuperAdmin}
+          useAdminList={verReportesAmpliados}
+          groupByUser={verReportesAmpliados && usarVistaNacional && canViewNationalReports}
+          title="Monitoreos finalizados · reportes Excel/PDF"
+          filters={roundHistoryFilters}
+          showIdSearch={verReportesAmpliados}
+        />
       )}
 
     </div>

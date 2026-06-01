@@ -87,9 +87,11 @@ export async function fetchRoundHistoryDetail(
   return { data: data?.data ?? null, error: null };
 }
 
-export async function fetchMyRoundHistory(): Promise<RoundHistoryRow[]> {
+export async function fetchMyRoundHistory(limit = 40): Promise<RoundHistoryRow[]> {
   if (!USE_MRV_API) return [];
-  const { data, error } = await mrvApiFetch<{ data: RoundHistoryRow[] }>('/api/rounds/history');
+  const { data, error } = await mrvApiFetch<{ data: RoundHistoryRow[] }>(
+    `/api/rounds/history?limit=${Math.min(50, Math.max(1, limit))}`
+  );
   if (error || !data?.data) return [];
   return data.data;
 }

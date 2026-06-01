@@ -190,6 +190,15 @@ async function enrichRoundTeamNames(round) {
   return { ...round, colaboradores, colaboradorUserIds: ids };
 }
 
+const ROUND_HISTORY_LIST_SQL = `
+  h.id, h.user_id, h.round_local_id, h.round_codigo, h.modulo_label,
+  h.assigned_region, h.assigned_distrito, h.assigned_servicio,
+  h.barrio, h.responsable, h.entrevistador, h.colaboradores_json,
+  (h.snapshot_json IS NOT NULL) AS has_snapshot,
+  h.efectivas, h.no_efectivas, h.fallidas, h.renuentes,
+  h.total_ninos, h.vacunados, h.visitadas, h.total_casas,
+  h.cobertura_vacunacion, h.aprobado, h.completada_at`;
+
 function mapRoundHistoryRow(row) {
   const completada = row.completada_at ? new Date(row.completada_at).getTime() : Date.now();
   return {
@@ -228,7 +237,7 @@ function mapRoundHistoryRow(row) {
     visitadas: Number(row.visitadas) || 0,
     totalCasas: Number(row.total_casas) || 20,
     completadaAt: completada,
-    has_snapshot: Boolean(row.snapshot_json),
+    has_snapshot: Boolean(row.has_snapshot ?? row.snapshot_json),
   };
 }
 
@@ -1440,7 +1449,7 @@ export function createApp() {
       await ensureRoundHistoryTable();
       const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
       const { rows } = await query(
-        `SELECT h.*, p.display_name, p.email
+        `SELECT ${ROUND_HISTORY_LIST_SQL}, p.display_name, p.email
          FROM round_monitoring_history h
          LEFT JOIN profiles p ON p.user_id = h.user_id
          WHERE h.user_id = $1
@@ -1558,7 +1567,7 @@ export function createApp() {
       const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
       params.push(limit);
       const { rows } = await query(
-        `SELECT h.*, p.display_name, p.email,
+        `SELECT ${ROUND_HISTORY_LIST_SQL}, p.display_name, p.email,
                 p.assigned_region AS profile_region,
                 p.assigned_distrito AS profile_distrito,
                 p.assigned_servicio AS profile_servicio

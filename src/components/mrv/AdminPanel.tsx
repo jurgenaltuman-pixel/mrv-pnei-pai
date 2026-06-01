@@ -29,8 +29,14 @@ import { formatFechaHoraPy } from '@/lib/format-fecha';
 import { hasProfileScopeAssignment } from '@/lib/registro-scope';
 import { useProfileScope } from '@/hooks/useProfileScope';
 import RegistroEditDialog, { type RegistroEditFields } from '@/components/mrv/RegistroEditDialog';
-import RoundHistoryAccordion from '@/components/mrv/RoundHistoryAccordion';
-import { fetchAdminRoundHistory } from '@/services/roundHistoryApi';
+import RoundHistoryPanel from '@/components/mrv/RoundHistoryPanel';
+import {
+  type AppRole,
+  ROLE_LABELS,
+  rolesAssignableBy,
+  canManageUserRoles,
+  canChangeTargetRole,
+} from '@/lib/app-roles';
 
 type PersonaRow = Database['public']['Tables']['base_personas']['Row'];
 
@@ -98,11 +104,12 @@ interface ProfileRow {
   assigned_servicio?: string | null;
   assigned_barrio?: string | null;
   scope_locked?: boolean;
+  has_credentials?: boolean;
 }
 
 interface UserRoleRow {
   user_id: string;
-  role: 'super_admin' | 'admin' | 'moderator' | 'user';
+  role: AppRole;
 }
 
 function parseDate(val: unknown): string | null {
@@ -184,8 +191,10 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
   const [exportingNominal, setExportingNominal] = useState(false);
   const [editingNominalId, setEditingNominalId] = useState<string | null>(null);
   const [registroEdit, setRegistroEdit] = useState<RegistroEditFields | null>(null);
-  const [roundHistory, setRoundHistory] = useState<Awaited<ReturnType<typeof fetchAdminRoundHistory>>>([]);
-  const [loadingRoundHistory, setLoadingRoundHistory] = useState(false);
+  const [roundFilterRegion, setRoundFilterRegion] = useState('');
+  const [roundFilterDistrito, setRoundFilterDistrito] = useState('');
+  const [roundFilterServicio, setRoundFilterServicio] = useState('');
+  const [roundFilterResponsable, setRoundFilterResponsable] = useState('');
   const [qNominal, setQNominal] = useState('');
   const [profiles, setProfiles] = useState<ProfileRow[]>([]);
   const [roles, setRoles] = useState<UserRoleRow[]>([]);
@@ -270,7 +279,7 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
     roles.forEach((r) => {
       // Prioridad por jerarquía
       const current = map.get(r.user_id);
-      const order = { super_admin: 4, admin: 3, moderator: 2, user: 1 };
+      const order = { super_admin: 6, admin: 5, supervisor: 4, regional: 3, moderator: 2, user: 1 };
       if (!current || order[r.role] > order[current]) map.set(r.user_id, r.role);
     });
     return map;
@@ -290,9 +299,33 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
     );
   }, [profiles, qUsers, userListFilter]);
 
-  const setPrimaryRole = async (userId: string, role: UserRoleRow['role']) => {
-    if (!isSuperAdmin && role === 'super_admin') {
-      toast({ title: 'Solo super admin puede asignar ese rol', variant: 'destructive' });
+  const assignableRoles = useMemo(
+    () => rolesAssignableBy({ isSuperAdmin, isAdmin }),
+    [isSuperAdmin, isAdmin]
+  );
+
+  const setPrimaryRole = async (userId: string, role: AppRole) => {
+    if (!canManageUserRoles({ isSuperAdmin, isAdmin })) {
+      toast({ title: 'Sin permiso para cambiar roles', variant: 'destructive' });
+      return;
+    }
+    const targetCurrent = roleByUser.get(userId);
+    if (!canChangeTargetRole({ isSuperAdmin, isAdmin }, targetCurrent)) {
+      toast({
+        title: 'Sin permiso',
+        description: 'Solo un super administrador puede modificar otro super admin.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (!assignableRoles.includes(role)) {
+      toast({
+        title: 'Rol no permitido',
+        description: isSuperAdmin
+          ? 'Rol no válido.'
+          : 'Como administrador podés asignar: brigadista, moderador, regional, supervisor, admin.',
+        variant: 'destructive',
+      });
       return;
     }
     setSavingRoleFor(userId);
@@ -302,7 +335,7 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
       toast({ title: 'No se pudo asignar el rol', description: errMsg, variant: 'destructive' });
       return;
     }
-    toast({ title: 'Rol actualizado' });
+    toast({ title: 'Rol actualizado', description: ROLE_LABELS[role] });
     await loadUsersAndRoles();
   };
 
@@ -348,7 +381,7 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
     setResettingPasswordFor(null);
     toast({
       title: 'Contraseña reseteada',
-      description: `Clave temporal: ${password}. Se exigirá cambio al ingresar.`,
+      description: `Clave temporal: ${password}. Ingresar con usuario o email mostrado. Se exigirá cambio al ingresar.`,
     });
   };
 
@@ -498,15 +531,6 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
     toast({ title: 'Registro actualizado' });
     setRegistroEdit(null);
     await loadNominal();
-  };
-
-  const loadRoundHistory = async () => {
-    setLoadingRoundHistory(true);
-    try {
-      setRoundHistory(await fetchAdminRoundHistory());
-    } finally {
-      setLoadingRoundHistory(false);
-    }
   };
 
   const handleImportRegistrosExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -991,14 +1015,6 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
     void loadNominal();
   }, [adminTab, isAdmin, isSuperAdmin]);
 
-  const roundHistoryAutoLoadRef = useRef(false);
-  useEffect(() => {
-    if (adminTab !== 'rondas' || (!isAdmin && !isSuperAdmin)) return;
-    if (roundHistoryAutoLoadRef.current) return;
-    roundHistoryAutoLoadRef.current = true;
-    void loadRoundHistory();
-  }, [adminTab, isAdmin, isSuperAdmin]);
-
   const handleClear = async () => {
     if (!window.confirm('Esto eliminará todos los registros de la base de personas. ¿Continuar?')) return;
     setUploading(true);
@@ -1067,6 +1083,14 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
             </button>
           </div>
         </div>
+        {(isAdmin || isSuperAdmin) && (
+          <p className="text-[11px] text-muted-foreground border-l-2 border-primary/40 pl-2">
+            <span className="font-semibold text-foreground">Roles:</span>{' '}
+            {isSuperAdmin
+              ? 'Podés asignar todos los roles (brigadista, moderador, regional, supervisor nacional, admin, super admin).'
+              : 'Podés asignar brigadista, moderador, supervisor regional, supervisor nacional y administrador.'}
+          </p>
+        )}
         <p className="text-[11px] text-muted-foreground leading-relaxed border-l-2 border-primary/40 pl-2">
           Los datos de esta grilla vienen de la tabla public.profiles. El listado de Authentication en Supabase
           es distinto: si alguien solo existe allí, no aparece acá hasta tener fila de perfil. Tras desplegar la app,
@@ -1117,6 +1141,11 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${p.is_active ? 'bg-secondary text-secondary-foreground' : 'bg-destructive/10 text-destructive'}`}>
                         {p.is_active ? 'Activo' : 'Inactivo'}
                       </span>
+                      {p.has_credentials === false && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-warning/15 text-warning-foreground" title="Sin contraseña en el sistema — use Reset clave">
+                          Sin clave
+                        </span>
+                      )}
                     </div>
                     <div className="grid grid-cols-2 gap-1">
                       {(() => {
@@ -1214,18 +1243,33 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
                     </label>
                   </div>
                   <div className="flex flex-col gap-1">
-                    <select
-                      value={roleByUser.get(p.user_id) || 'user'}
-                      onChange={(e) => setPrimaryRole(p.user_id, e.target.value as UserRoleRow['role'])}
-                      disabled={savingRoleFor === p.user_id}
-                      className="h-8 px-2 rounded border bg-background text-xs"
-                      title="Asignar rol"
-                    >
-                      <option value="user">user</option>
-                      <option value="moderator">moderator</option>
-                      <option value="admin">admin</option>
-                      <option value="super_admin">super_admin</option>
-                    </select>
+                    {canManageUserRoles({ isSuperAdmin, isAdmin }) &&
+                    canChangeTargetRole({ isSuperAdmin, isAdmin }, roleByUser.get(p.user_id)) ? (
+                      <select
+                        value={roleByUser.get(p.user_id) || 'user'}
+                        onChange={(e) => setPrimaryRole(p.user_id, e.target.value as AppRole)}
+                        disabled={savingRoleFor === p.user_id}
+                        className="h-8 px-2 rounded border bg-background text-xs font-medium"
+                        title="Asignar rol"
+                      >
+                        {assignableRoles.map((r) => (
+                          <option key={r} value={r}>
+                            {ROLE_LABELS[r]}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span
+                        className="h-8 px-2 flex items-center text-[11px] text-muted-foreground border rounded bg-muted/30"
+                        title={
+                          roleByUser.get(p.user_id) === 'super_admin' && !isSuperAdmin
+                            ? 'Solo super admin puede editar este rol'
+                            : undefined
+                        }
+                      >
+                        {ROLE_LABELS[roleByUser.get(p.user_id) || 'user']}
+                      </span>
+                    )}
                     <button
                       type="button"
                       onClick={() => saveUserScope(p.user_id)}
@@ -1258,9 +1302,13 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
                         onClick={() => resetPasswordByDefault(p.user_id)}
                         disabled={resettingPasswordFor === p.user_id}
                         className="h-8 px-2 rounded bg-secondary text-secondary-foreground text-[11px] font-semibold disabled:opacity-50"
-                        title="Resetear contraseña por defecto"
+                        title={p.has_credentials === false ? 'Crear contraseña de acceso (usuario sin clave)' : 'Resetear contraseña por defecto'}
                       >
-                        {resettingPasswordFor === p.user_id ? 'Reseteando...' : 'Reset clave'}
+                        {resettingPasswordFor === p.user_id
+                          ? 'Reseteando...'
+                          : p.has_credentials === false
+                            ? 'Crear clave'
+                            : 'Reset clave'}
                       </button>
                     )}
                     {isSuperAdmin && (
@@ -1429,9 +1477,12 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
                 toast({ title: 'No se pudo crear', description: error, variant: 'destructive' });
                 return;
               }
+              const payload = data as { password?: string; activated?: boolean; email?: string };
               toast({
-                title: 'Usuario creado',
-                description: `Clave temporal: ${(data as { password?: string })?.password || 'ver consola'}`,
+                title: payload.activated ? 'Acceso activado' : 'Usuario creado',
+                description: payload.activated
+                  ? `Ya estaba en la lista; se generó clave: ${payload.password || '—'}. Login: ${payload.email || un}`
+                  : `Clave temporal: ${payload.password || '—'}. Login: ${un} o ${email}`,
               });
               setManualUser({ ci: '', nombre: '', username: '', region: '', distrito: '', servicio: '' });
               await loadUsersAndRoles();
@@ -1605,27 +1656,59 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
 
       {adminTab === 'rondas' && (isAdmin || isSuperAdmin) && (
         <div className="section-card space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-bold text-primary uppercase tracking-wide">Historial de rondas</h3>
-            <button
-              type="button"
-              onClick={() => void loadRoundHistory()}
-              disabled={loadingRoundHistory}
-              className="h-9 px-3 rounded-lg bg-secondary text-secondary-foreground text-xs font-bold disabled:opacity-50"
-            >
-              {loadingRoundHistory ? 'Cargando...' : 'Actualizar'}
-            </button>
-          </div>
+          <h3 className="text-sm font-bold text-primary uppercase tracking-wide">Monitoreos · todo el país</h3>
           <p className="text-[10px] text-muted-foreground">
-            Rondas cerradas en el servidor, agrupadas por encuestador y asignación (región · distrito · servicio).
+            Vista admin: todas las rondas cerradas. Filtrá por asignación o ID; los reportes se descargan por ronda.
           </p>
-          {loadingRoundHistory && roundHistory.length === 0 ? (
-            <p className="text-xs text-muted-foreground flex items-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin" /> Cargando historial…
-            </p>
-          ) : (
-            <RoundHistoryAccordion rows={roundHistory} groupByUser adminMode />
-          )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <input
+              type="text"
+              placeholder="Región"
+              value={roundFilterRegion}
+              onChange={(e) => setRoundFilterRegion(e.target.value)}
+              className="w-full h-10 px-3 rounded-xl border bg-background text-sm"
+              aria-label="Filtrar rondas por región"
+            />
+            <input
+              type="text"
+              placeholder="Distrito"
+              value={roundFilterDistrito}
+              onChange={(e) => setRoundFilterDistrito(e.target.value)}
+              className="w-full h-10 px-3 rounded-xl border bg-background text-sm"
+              aria-label="Filtrar rondas por distrito"
+            />
+            <input
+              type="text"
+              placeholder="Servicio de salud"
+              value={roundFilterServicio}
+              onChange={(e) => setRoundFilterServicio(e.target.value)}
+              className="w-full h-10 px-3 rounded-xl border bg-background text-sm"
+              aria-label="Filtrar rondas por servicio"
+            />
+            <input
+              type="text"
+              placeholder="Responsable / encuestador"
+              value={roundFilterResponsable}
+              onChange={(e) => setRoundFilterResponsable(e.target.value)}
+              className="w-full h-10 px-3 rounded-xl border bg-background text-sm"
+              aria-label="Filtrar rondas por responsable"
+            />
+          </div>
+          <RoundHistoryPanel
+            lazy={false}
+            adminMode
+            useAdminList
+            groupByUser
+            showIdSearch
+            title="Historial de rondas (administración)"
+            filters={{
+              region: roundFilterRegion.trim() || undefined,
+              distrito: roundFilterDistrito.trim() || undefined,
+              servicio: roundFilterServicio.trim() || undefined,
+              responsable: roundFilterResponsable.trim() || undefined,
+              limit: 250,
+            }}
+          />
         </div>
       )}
 
