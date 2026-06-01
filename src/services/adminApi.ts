@@ -5,7 +5,8 @@ import { supabase, isSupabaseEnabled } from '@/integrations/supabase/client';
 import { USE_MRV_API } from '@/lib/api-config';
 import * as backend from '@/services/mrvBackend';
 
-export type AppRole = 'super_admin' | 'admin' | 'moderator' | 'user';
+import type { AppRole } from '@/lib/app-roles';
+export type { AppRole };
 
 export interface ProfileRow {
   user_id: string;

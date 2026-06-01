@@ -9,18 +9,19 @@ export function useRegistrosQuery(
   opts?: { national?: boolean }
 ) {
   const { refreshKey } = useDataRefresh();
-  const { loading: roleLoading, isAdmin, isSuperAdmin } = useRole();
-  const national = Boolean(opts?.national && (isAdmin || isSuperAdmin));
+  const { loading: roleLoading, canViewNationalReports, canViewRegionalReports } = useRole();
+  const useReportApi = canViewRegionalReports;
+  const national = Boolean(opts?.national && canViewNationalReports);
 
   return useQuery<RegistroMRV[]>({
     queryKey: [
       'registros-mrv',
       limit,
-      national ? 'national' : 'scoped',
+      useReportApi ? (national ? 'national' : 'report') : 'scoped',
       refreshKey,
       roleLoading ? 'roles-pending' : 'roles-ready',
     ],
-    queryFn: () => dataService.getRegistros(limit, { national }),
+    queryFn: () => dataService.getRegistros(limit, { national, useReportApi }),
     staleTime: 2 * 60_000,
     gcTime: 10 * 60_000,
     refetchOnWindowFocus: false,

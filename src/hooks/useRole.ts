@@ -2,17 +2,35 @@ import { useState, useEffect } from 'react';
 import { supabase, isSupabaseEnabled } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { USE_MRV_API, mrvApiFetch } from '@/lib/api-config';
+import type { AppRole } from '@/lib/app-roles';
+import {
+  roleFlagsFromList,
+  canViewNationalReports,
+  canViewRegionalReports,
+  canAccessDashboardReports,
+  type RoleFlags,
+} from '@/lib/report-scope';
 
 export function useRole() {
   const { user } = useAuth();
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [flags, setFlags] = useState<RoleFlags>({
+    roles: [],
+    isSuperAdmin: false,
+    isAdmin: false,
+    isSupervisor: false,
+    isRegional: false,
+  });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!user) {
-      setIsAdmin(false);
-      setIsSuperAdmin(false);
+      setFlags({
+        roles: [],
+        isSuperAdmin: false,
+        isAdmin: false,
+        isSupervisor: false,
+        isRegional: false,
+      });
       setLoading(false);
       return;
     }
@@ -24,10 +42,8 @@ export function useRole() {
             setLoading(false);
             return;
           }
-          const roles = data.data?.map((r) => r.role) || [];
-          const superAdmin = roles.includes('super_admin');
-          setIsSuperAdmin(superAdmin);
-          setIsAdmin(superAdmin || roles.includes('admin'));
+          const roles = (data.data?.map((r) => r.role) || []) as AppRole[];
+          setFlags(roleFlagsFromList(roles));
           setLoading(false);
         }
       );
@@ -44,13 +60,21 @@ export function useRole() {
       .select('role')
       .eq('user_id', user.id)
       .then(({ data }) => {
-        const roles = data?.map((r: { role: string }) => r.role) || [];
-        const superAdmin = roles.includes('super_admin');
-        setIsSuperAdmin(superAdmin);
-        setIsAdmin(superAdmin || roles.includes('admin'));
+        const roles = (data?.map((r: { role: string }) => r.role) || []) as AppRole[];
+        setFlags(roleFlagsFromList(roles));
         setLoading(false);
       });
   }, [user]);
 
-  return { isAdmin, isSuperAdmin, loading };
+  return {
+    loading,
+    roles: flags.roles,
+    isAdmin: flags.isAdmin,
+    isSuperAdmin: flags.isSuperAdmin,
+    isSupervisor: flags.isSupervisor,
+    isRegional: flags.isRegional,
+    canViewNationalReports: canViewNationalReports(flags),
+    canViewRegionalReports: canViewRegionalReports(flags),
+    canAccessDashboardReports: canAccessDashboardReports(flags),
+  };
 }
