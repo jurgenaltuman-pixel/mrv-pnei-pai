@@ -166,8 +166,13 @@ export default function RoundMonitoringFlow({
   useEffect(() => {
     if (!resumeRoundId) return;
     void (async () => {
-      const rows = await roundMonitoringStorage.listByUser(userId, 30);
-      const target = rows.find((r) => r.id === resumeRoundId);
+      await roundMonitoringStorage.syncDraftsFromServer(userId);
+      const drafts = await roundMonitoringStorage.listActiveDraftsForUser(userId);
+      let target = drafts.find((r) => r.id === resumeRoundId);
+      if (!target) {
+        const rows = await roundMonitoringStorage.listByUser(userId, 30);
+        target = rows.find((r) => r.id === resumeRoundId);
+      }
       if (!target || rondaCompletada(target)) return;
       undismissRound(userId, target.id);
       const r = aplicarMetaFija(target);
@@ -175,12 +180,19 @@ export default function RoundMonitoringFlow({
       setBarrio(r.moduloLabel);
       applyEquipoFromRound(r);
       setSavedRound(null);
+      setRecoverableRounds(drafts.filter((x) => x.id !== r.id));
       setEstadoDraft(null);
+      setRondaRegistrada(r.fase === 'summary' && countCasasEfectivas(r.casas) >= r.totalCasas);
       void roundMonitoringStorage.save(r);
+      onJornadaUpdate?.(setRondaActivaNombre(userId, r.moduloLabel));
       onRoundsChanged?.();
-      toast({ title: 'Ronda reanudada', description: `${r.moduloLabel} · ID ${r.codigo}` });
+      const eff = countCasasEfectivas(r.casas);
+      toast({
+        title: 'Ronda reanudada',
+        description: `${r.moduloLabel} · ${eff}/${r.totalCasas} efectivas (E)`,
+      });
     })();
-  }, [resumeRoundId, userId, setBarrio, onRoundsChanged, toast]);
+  }, [resumeRoundId, userId, setBarrio, onRoundsChanged, onJornadaUpdate, toast, applyEquipoFromRound]);
 
   useEffect(() => {
     let cancelled = false;

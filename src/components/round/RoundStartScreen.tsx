@@ -116,8 +116,10 @@ export default function RoundStartScreen({
       )}
 
       {savedRound && onContinueRound && (
-        <div className="mb-5 rounded-2xl border-2 border-primary/40 bg-primary/10 p-4 space-y-3">
-          <p className="text-[11px] font-bold uppercase tracking-wide text-primary">Ronda en curso</p>
+        <div className="mb-5 rounded-2xl border-2 border-primary/50 bg-primary/15 p-4 space-y-3 shadow-sm">
+          <p className="text-[11px] font-bold uppercase tracking-wide text-primary">
+            Continuar donde quedaste
+          </p>
           <p className="text-[10px] font-mono text-muted-foreground">ID {formatRoundCodigoDisplay(savedRound)}</p>
           {(savedRound.colaboradores?.length ?? 0) > 0 && (
             <p className="text-[10px] text-muted-foreground">

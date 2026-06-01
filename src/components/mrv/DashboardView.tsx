@@ -29,6 +29,7 @@ import {
 import { useProfileScope } from '@/hooks/useProfileScope';
 import { getJornadaStats } from '@/lib/jornada-storage';
 import JornadaSummary from '@/components/mrv/JornadaSummary';
+import type { RoundMonitoring } from '@/types/round-monitoring';
 import VisitaMapFilterBar from '@/components/mrv/VisitaMapFilterBar';
 import { defaultUseNationalView } from '@/lib/report-scope';
 
@@ -61,7 +62,11 @@ function KpiCard({
   );
 }
 
-export default function DashboardView() {
+interface DashboardViewProps {
+  onResumeRound?: (round: RoundMonitoring) => void;
+}
+
+export default function DashboardView({ onResumeRound }: DashboardViewProps = {}) {
   const { user } = useAuth();
   const role = useRole();
   const {
@@ -384,7 +389,13 @@ export default function DashboardView() {
         </div>
       </div>
 
-      {user && <JornadaSummary stats={jornadaStats} />}
+      {user && (
+        <JornadaSummary
+          stats={jornadaStats}
+          userId={user.id}
+          onContinueRound={onResumeRound}
+        />
+      )}
 
       {canViewNationalReports && tieneAsignacionZonal && (
         <label className="flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2.5 text-sm cursor-pointer">

@@ -147,6 +147,13 @@ export default function MainApp() {
   const [pendingDriveCount, setPendingDriveCount] = useState(0);
   const [syncingOffline, setSyncingOffline] = useState(false);
   const [resumeRoundId, setResumeRoundId] = useState<string | null>(null);
+
+  const handleResumeRound = useCallback((r: RoundMonitoring) => {
+    setResumeRoundId(r.id);
+    setTab('registro');
+    setBarrio(r.moduloLabel);
+    setRoundsDockKey((k) => k + 1);
+  }, [setBarrio]);
   const [roundsDockKey, setRoundsDockKey] = useState(0);
   const [activeRoundId, setActiveRoundId] = useState<string | null>(null);
   const [padronBgPct, setPadronBgPct] = useState<number | null>(null);
@@ -1375,7 +1382,7 @@ export default function MainApp() {
 
         {tab === 'dashboard' && (
           <Suspense fallback={<PageSkeleton rows={5} />}>
-            <DashboardView />
+            <DashboardView onResumeRound={handleResumeRound} />
           </Suspense>
         )}
         {tab === 'mapa' && (
@@ -1390,16 +1397,12 @@ export default function MainApp() {
         )}
       </main>
 
-      {tab === 'registro' && user && (
+      {(tab === 'registro' || tab === 'dashboard') && user && (
         <RecentRoundsDock
           userId={user.id}
           activeRoundId={activeRoundId}
           refreshKey={roundsDockKey}
-          onResume={(r: RoundMonitoring) => {
-            setResumeRoundId(r.id);
-            setTab('registro');
-            setBarrio(r.moduloLabel);
-          }}
+          onResume={handleResumeRound}
         />
       )}
 
