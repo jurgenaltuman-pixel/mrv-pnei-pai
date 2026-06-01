@@ -196,6 +196,22 @@ export function hasUsefulCedulaData(fields: CedulaOcrFields, target: CedulaOcrTa
   );
 }
 
+/** Puntaje para elegir el mejor resultado entre varias pasadas OCR. */
+export function scoreCedulaParse(fields: CedulaOcrFields, target: CedulaOcrTarget): number {
+  let score = 0;
+  if (target === 'madre') {
+    if (fields.documentoMadre) score += 12;
+    if (fields.nombre && fields.nombre.length >= 6) score += 6;
+    return score;
+  }
+  if (fields.documento) score += 12;
+  if (fields.nombre && fields.nombre.length >= 6) score += 6;
+  if (fields.fechaNacimiento) score += 4;
+  if (fields.sexo) score += 2;
+  if (fields.documentoMadre) score += 2;
+  return score;
+}
+
 export function parseCedulaOcrText(rawText: string, target: CedulaOcrTarget = 'nino'): CedulaOcrFields {
   const warnings: string[] = [];
   const cleaned = normalizeOcrRawText(rawText);

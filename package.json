@@ -1,7 +1,7 @@
 {
   "name": "vite_react_shadcn_ts",
   "private": true,
-  "version": "2.6.31",
+  "version": "2.6.32",
   "description": "M R V — PNEI y PAI — MSPBS · registro nominal en terreno (soporte offline)",
   "author": "MSPBS — PNEI / PAI",
   "type": "module",
@@ -28,7 +28,7 @@
     "mobile:prepare": "npm run build && npx cap sync",
     "android:apk:debug": "npm run cap:sync:android && cd android && ./gradlew assembleDebug",
     "android:apk:release": "npm run cap:sync:android && bash scripts/ci-android-signing.sh && cd android && ./gradlew assembleRelease",
-    "android:apk:release:win": "npm run cap:sync:android && powershell -ExecutionPolicy Bypass -File scripts/ci-android-signing.ps1 && cd android && gradlew.bat assembleRelease -PVERSION_NAME=2.6.31 -PVERSION_CODE=20631",
+    "android:apk:release:win": "npm run cap:sync:android && powershell -ExecutionPolicy Bypass -File scripts/ci-android-signing.ps1 && cd android && gradlew.bat assembleRelease -PVERSION_NAME=2.6.32 -PVERSION_CODE=20632",
     "android:aab:release": "npm run cap:sync:android && bash scripts/ci-android-signing.sh && cd android && ./gradlew bundleRelease",
     "import:mrv-data": "node scripts/import-mrv-data.mjs",
     "import:mrv-catalogo": "node scripts/import-mrv-data.mjs --solo-catalogo",

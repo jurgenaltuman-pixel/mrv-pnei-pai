@@ -18,7 +18,8 @@ describe('app mobile guards', () => {
     const src = fs.readFileSync(path.join(root, 'src/lib/cedula-ocr.ts'), 'utf8');
     expect(src).not.toContain('workerFailed');
     expect(src).not.toContain('OCR no disponible en este dispositivo');
-    expect(src).toContain('canvasFromImageElement');
+    expect(src).toContain('workerPromise = null');
+    expect(src).toContain('fileToOcrBitmap');
   });
 
   it('adjuntos Drive exponen cámara y galería por imagen', () => {
@@ -41,7 +42,8 @@ describe('app mobile guards', () => {
 
   it('OCR APK: flujo escanear y autocompletar', () => {
     const src = fs.readFileSync(path.join(root, 'src/components/mrv/CedulaOcrButtons.tsx'), 'utf8');
-    expect(src).toContain('Escanear CI');
+    expect(src).toContain('Cámara');
+    expect(src).toContain('Galería');
     expect(src).toContain('Autocompletar');
     expect(src).toContain('scanCedulaFromFile');
   });
@@ -50,6 +52,7 @@ describe('app mobile guards', () => {
     const src = fs.readFileSync(path.join(root, 'src/lib/cedula-ocr.ts'), 'utf8');
     expect(src).toContain('recognizeWithModes');
     expect(src).toContain('hasUsefulCedulaData');
+    expect(src).toContain('buildOcrVariantCanvases');
   });
 
   it('service worker precachea assets Tesseract offline', () => {

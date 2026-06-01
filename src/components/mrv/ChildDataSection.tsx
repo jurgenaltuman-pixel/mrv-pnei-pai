@@ -756,7 +756,11 @@ export default function ChildDataSection(props: Props) {
               disabled={searching}
               onResult={aplicarOcr}
               onError={(msg) =>
-                toast({ title: 'No se pudo leer la cédula', description: msg, variant: 'destructive' })
+                toast({
+                  title: 'Escaneo de cédula',
+                  description: msg,
+                  variant: 'destructive',
+                })
               }
             />
           </Suspense>

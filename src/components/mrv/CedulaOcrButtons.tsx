@@ -1,8 +1,9 @@
 import { useRef, useState, useEffect } from 'react';
-import { Camera, Loader2, ScanLine, Check, RotateCcw } from 'lucide-react';
+import { Camera, ImagePlus, Loader2, ScanLine, Check, RotateCcw } from 'lucide-react';
 import { preloadCedulaOcr, scanCedulaFromFile, type CedulaOcrProgress } from '@/lib/cedula-ocr';
 import type { CedulaOcrFields, CedulaOcrTarget } from '@/lib/cedula-ocr-parse';
 import { formatFechaPy } from '@/lib/format-fecha';
+import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 
 type Props = {
   disabled?: boolean;
@@ -12,19 +13,45 @@ type Props = {
 
 export default function CedulaOcrButtons({ disabled, onResult, onError }: Props) {
   const cameraRef = useRef<HTMLInputElement>(null);
+  const galleryRef = useRef<HTMLInputElement>(null);
   const [target, setTarget] = useState<CedulaOcrTarget>('nino');
   const [busy, setBusy] = useState(false);
+  const [ocrReady, setOcrReady] = useState(false);
   const [progress, setProgress] = useState<CedulaOcrProgress | null>(null);
   const [preview, setPreview] = useState<{ fields: CedulaOcrFields; target: CedulaOcrTarget } | null>(
     null
   );
+  const isOnline = useOnlineStatus();
 
   useEffect(() => {
-    void preloadCedulaOcr().catch(() => {});
+    let cancelled = false;
+    void preloadCedulaOcr()
+      .then(() => {
+        if (!cancelled) setOcrReady(true);
+      })
+      .catch(() => {
+        if (!cancelled) setOcrReady(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const scan = async (file: File | undefined) => {
     if (!file || busy) return;
+    if (!ocrReady) {
+      try {
+        await preloadCedulaOcr();
+        setOcrReady(true);
+      } catch (e) {
+        onError?.(
+          e instanceof Error
+            ? e.message
+            : 'El escáner aún no está listo. Esperá unos segundos y volvé a intentar.'
+        );
+        return;
+      }
+    }
     setBusy(true);
     setPreview(null);
     setProgress({ status: 'loading', progress: 0, message: 'Abriendo escáner…' });
@@ -32,7 +59,8 @@ export default function CedulaOcrButtons({ disabled, onResult, onError }: Props)
       const fields = await scanCedulaFromFile(file, target, setProgress);
       setPreview({ fields, target });
     } catch (e) {
-      onError?.(e instanceof Error ? e.message : 'No se pudo leer la cédula');
+      const msg = e instanceof Error ? e.message : 'Revisá la foto e intentá de nuevo.';
+      onError?.(msg);
     } finally {
       setBusy(false);
       setProgress(null);
@@ -47,11 +75,22 @@ export default function CedulaOcrButtons({ disabled, onResult, onError }: Props)
 
   const labelTarget = (t: CedulaOcrTarget) => (t === 'nino' ? 'niño/a' : 'madre');
 
+  const pick = (source: 'camera' | 'gallery') => {
+    if (source === 'camera') cameraRef.current?.click();
+    else galleryRef.current?.click();
+  };
+
   return (
     <div className="rounded-lg border border-primary/25 bg-primary/5 p-2 space-y-2">
       <p className="text-[10px] font-bold text-primary flex items-center gap-1">
         <ScanLine className="w-3.5 h-3.5" />
-        Escanear cédula (solo app)
+        Escanear cédula (funciona sin internet)
+      </p>
+      <p className="text-[9px] text-muted-foreground leading-snug">
+        {ocrReady
+          ? 'Escáner listo. Foto nítida, sin reflejos, cédula completa en el cuadro.'
+          : 'Cargando escáner… la primera vez puede tardar unos segundos.'}
+        {isOnline ? ' Con datos también podés usar Buscar en padrón.' : ''}
       </p>
 
       <div className="flex gap-1">
@@ -78,7 +117,19 @@ export default function CedulaOcrButtons({ disabled, onResult, onError }: Props)
         accept="image/*"
         capture="environment"
         className="hidden"
-        aria-label="Escanear cédula con cámara"
+        aria-label="Foto de cédula con cámara"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = '';
+          void scan(f);
+        }}
+      />
+      <input
+        ref={galleryRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        aria-label="Elegir foto de cédula desde galería"
         onChange={(e) => {
           const f = e.target.files?.[0];
           e.target.value = '';
@@ -86,15 +137,26 @@ export default function CedulaOcrButtons({ disabled, onResult, onError }: Props)
         }}
       />
 
-      <button
-        type="button"
-        disabled={disabled || busy}
-        onClick={() => cameraRef.current?.click()}
-        className="h-9 w-full rounded-lg bg-primary text-primary-foreground text-xs font-bold inline-flex items-center justify-center gap-1.5 disabled:opacity-50"
-      >
-        {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
-        {busy ? 'Escaneando…' : `Escanear CI ${labelTarget(target)}`}
-      </button>
+      <div className="grid grid-cols-2 gap-1.5">
+        <button
+          type="button"
+          disabled={disabled || busy}
+          onClick={() => pick('camera')}
+          className="h-9 rounded-lg bg-primary text-primary-foreground text-[10px] font-bold inline-flex items-center justify-center gap-1 disabled:opacity-50"
+        >
+          {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
+          Cámara
+        </button>
+        <button
+          type="button"
+          disabled={disabled || busy}
+          onClick={() => pick('gallery')}
+          className="h-9 rounded-lg border border-primary/40 bg-background text-primary text-[10px] font-bold inline-flex items-center justify-center gap-1 disabled:opacity-50"
+        >
+          {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ImagePlus className="w-3.5 h-3.5" />}
+          Galería
+        </button>
+      </div>
 
       {progress && (
         <p className="text-[10px] text-muted-foreground" role="status">

@@ -8,6 +8,7 @@ import {
   hasUsefulCedulaData,
   normalizeCiDigits,
   parseCedulaOcrText,
+  scoreCedulaParse,
 } from '@/lib/cedula-ocr-parse';
 
 const SAMPLE_NINO = `
@@ -71,5 +72,11 @@ describe('cedula-ocr-parse', () => {
 
   it('detecta nombre compuesto', () => {
     expect(extractNombre(SAMPLE_NINO)).toMatch(/GONZALEZ.*MARIA/i);
+  });
+
+  it('puntúa mejor un parse con CI que uno vacío', () => {
+    const full = parseCedulaOcrText(SAMPLE_NINO, 'nino');
+    const empty = parseCedulaOcrText('texto sin datos', 'nino');
+    expect(scoreCedulaParse(full, 'nino')).toBeGreaterThan(scoreCedulaParse(empty, 'nino'));
   });
 });
