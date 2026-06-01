@@ -377,8 +377,12 @@ export const dataService = {
 
       const maxResults = Math.max(5, Math.min(options?.limit ?? 20, 50));
       const pCacheKey = personaBaseQueryCacheKey(maxResults, normalized);
+      const rawTokens = normalized.split(/\s+/).map((t) => t.trim()).filter(Boolean);
+      const needleTokens = rawTokens.map((t) => normalizeText(t)).filter(Boolean);
+      const isNumeric = /^\d+$/.test(normalized);
+
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
-        if (await mrvPadronIndexed.isReady()) {
+        if (await mrvPadronIndexed.hasLocalData()) {
           const local = await mrvPadronIndexed.searchGeneral(normalized, {
             maxResults,
             isNumeric,
@@ -390,12 +394,18 @@ export const dataService = {
         return await loadCachedPersonas(pCacheKey);
       }
 
+      if (await mrvPadronIndexed.preferLocalSearch()) {
+        const local = await mrvPadronIndexed.searchGeneral(normalized, {
+          maxResults,
+          isNumeric,
+          needleTokens,
+          normalize: normalizeText,
+        });
+        return local as PersonaBase[];
+      }
+
       const fetchCap = Math.min(80, maxResults * 4);
       const signal = options?.signal;
-
-      const rawTokens = normalized.split(/\s+/).map((t) => t.trim()).filter(Boolean);
-      const needleTokens = rawTokens.map((t) => normalizeText(t)).filter(Boolean);
-      const isNumeric = /^\d+$/.test(normalized);
 
       if (isNumeric && normalized.length >= 4) {
         try {
@@ -514,7 +524,7 @@ export const dataService = {
         }
         const cached = await loadCachedPersonas(pCacheKey);
         if (cached.length) return cached;
-        if (await mrvPadronIndexed.isReady()) {
+        if (await mrvPadronIndexed.hasLocalData()) {
           return (await mrvPadronIndexed.searchGeneral(normalized, {
             maxResults,
             isNumeric,
@@ -563,7 +573,7 @@ export const dataService = {
         console.error('Error en getBasePersonas:', error);
         const cached = await loadCachedPersonas(pCacheKey);
         if (cached.length) return cached;
-        if (await mrvPadronIndexed.isReady()) {
+        if (await mrvPadronIndexed.hasLocalData()) {
           const local = await mrvPadronIndexed.searchGeneral(normalized, {
             maxResults,
             isNumeric,
@@ -628,7 +638,7 @@ export const dataService = {
       const rawTokens = norm.split(/\s+/).map((t) => t.trim()).filter(Boolean);
       const needleTokens = rawTokens.map((t) => normalizeText(t)).filter(Boolean);
       const isNumeric = /^\d+$/.test(norm);
-      if (await mrvPadronIndexed.isReady()) {
+      if (await mrvPadronIndexed.hasLocalData()) {
         const local = await mrvPadronIndexed.searchGeneral(norm, {
           maxResults: maxRes,
           isNumeric,
@@ -686,11 +696,15 @@ export const dataService = {
     if (!doc || doc.length < minLen) return [];
     const cacheKey = `doc:${tipo}:${doc}`;
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      if (await mrvPadronIndexed.isReady()) {
+      if (await mrvPadronIndexed.hasLocalData()) {
         const local = await mrvPadronIndexed.searchByDocument(doc, tipo, limit);
         return local as PersonaBase[];
       }
       return await loadCachedPersonas(cacheKey);
+    }
+    if (await mrvPadronIndexed.preferLocalSearch()) {
+      const local = await mrvPadronIndexed.searchByDocument(doc, tipo, limit);
+      return local as PersonaBase[];
     }
     try {
       if (usePadronApi) {
@@ -767,7 +781,7 @@ export const dataService = {
         return rows;
       }
       }
-      if (await mrvPadronIndexed.isReady()) {
+      if (await mrvPadronIndexed.hasLocalData()) {
         const local = await mrvPadronIndexed.searchByDocument(doc, tipo, limit);
         if (local.length) {
           persistPersonasCache(cacheKey, local as PersonaBase[]);
@@ -913,11 +927,21 @@ export const dataService = {
       .filter((s) => s.length >= 2);
 
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      if (await mrvPadronIndexed.isReady()) {
+      if (await mrvPadronIndexed.hasLocalData()) {
         const local = await mrvPadronIndexed.searchDatosPersonales(filtros, nombreCoincidePartes, normalizeText, limit);
         return local as PersonaBase[];
       }
       return await loadCachedPersonas(pKey);
+    }
+
+    if (await mrvPadronIndexed.preferLocalSearch()) {
+      const local = await mrvPadronIndexed.searchDatosPersonales(
+        filtros,
+        nombreCoincidePartes,
+        normalizeText,
+        limit
+      );
+      return local as PersonaBase[];
     }
 
     try {

@@ -6,7 +6,7 @@ import {
   countCasasEfectivas,
   getEstadoConfig,
 } from '@/lib/croquis-housing';
-import { ChevronRight, ListChecks, Undo2 } from 'lucide-react';
+import { ChevronRight, Home, ListChecks, Undo2 } from 'lucide-react';
 
 interface Props {
   casas: CasaMonitoreo[];
@@ -73,15 +73,9 @@ function CroquisMap({
         </div>
 
         <div className="croquis-house-visual">
-          <img
-            src="/croquis-casa.png"
-            alt=""
-            className="croquis-house-img"
-            width={120}
-            height={120}
-            loading="lazy"
-            decoding="async"
-          />
+          <span className="croquis-house-icon" aria-hidden>
+            <Home className="w-14 h-14 text-primary" strokeWidth={1.75} />
+          </span>
           <span className="croquis-house-badge">#{siguiente.numero}</span>
         </div>
       </div>
@@ -115,15 +109,7 @@ function CroquisMap({
                   Boolean(onReabrirCasa);
                 const chip = (
                   <>
-                    <img
-                      src="/croquis-casa.png"
-                      alt=""
-                      className="w-4 h-4 object-contain opacity-80"
-                      width={16}
-                      height={16}
-                      loading="lazy"
-                      decoding="async"
-                    />
+                    <Home className="w-3.5 h-3.5 shrink-0 opacity-80" aria-hidden />
                     {c.numero}
                     {c.estado && <span className={cfg?.colorClass}>{c.estado}</span>}
                   </>

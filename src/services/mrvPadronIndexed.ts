@@ -102,6 +102,22 @@ export const mrvPadronIndexed = {
     return Boolean(m?.complete && m.rowCount > 0);
   },
 
+  /** Hay filas en IndexedDB (descarga completa o parcial). */
+  async hasLocalData(): Promise<boolean> {
+    const m = await this.getMeta();
+    return Boolean(m && m.rowCount > 0);
+  },
+
+  /** Padrón completo: usar solo local, sin volver a pedir descarga. */
+  async preferLocalSearch(): Promise<boolean> {
+    return this.isReady();
+  },
+
+  async getLocalRowCount(): Promise<number> {
+    const m = await this.getMeta();
+    return m?.rowCount ?? 0;
+  },
+
   async clearAll(): Promise<void> {
     const db = await openDB();
     const tx = db.transaction([STORE, META_STORE], 'readwrite');
@@ -156,19 +172,28 @@ export const mrvPadronIndexed = {
 
   async downloadFromServer(
     onProgress?: (p: PadronDownloadProgress) => void,
-    opts?: { resume?: boolean }
-  ): Promise<{ imported: number; error?: string; resumed?: boolean }> {
-    const prior = opts?.resume ? await this.getMeta() : null;
-    const canResume = Boolean(prior && !prior.complete && (prior.resumePage ?? 0) > 0);
+    opts?: { resume?: boolean; force?: boolean }
+  ): Promise<{ imported: number; error?: string; resumed?: boolean; skipped?: boolean }> {
+    const prior = await this.getMeta();
+    if (prior?.complete && prior.rowCount > 0 && !opts?.force) {
+      return { imported: prior.rowCount, skipped: true };
+    }
+
+    const canResume = Boolean(
+      prior && !prior.complete && prior.rowCount > 0 && (opts?.resume !== false)
+    );
     if (canResume && prior) {
       /* conserva filas ya en IndexedDB */
-    } else {
+    } else if (!prior?.rowCount || opts?.force) {
       await this.clearAll();
     }
-    let imported = canResume && prior ? prior.rowCount : 0;
-    let page = canResume && prior ? prior.resumePage ?? 0 : 0;
-    let bytesApprox = 0;
     const pageSize = 800;
+    let imported = canResume && prior ? prior.rowCount : 0;
+    let page =
+      canResume && prior
+        ? prior.resumePage ?? Math.max(0, Math.floor(prior.rowCount / pageSize))
+        : 0;
+    let bytesApprox = 0;
 
     let totalRows: number | null = null;
     try {
