@@ -1,7 +1,6 @@
 import { parseCedulaOcrText, type CedulaOcrFields, type CedulaOcrTarget } from '@/lib/cedula-ocr-parse';
 
 let workerPromise: Promise<import('tesseract.js').Worker> | null = null;
-let workerFailed = false;
 
 function tesseractAsset(path: string): string {
   const base = import.meta.env.BASE_URL || '/';
@@ -9,7 +8,6 @@ function tesseractAsset(path: string): string {
 }
 
 async function getOcrWorker(): Promise<import('tesseract.js').Worker> {
-  if (workerFailed) throw new Error('OCR no disponible en este dispositivo');
   if (!workerPromise) {
     workerPromise = (async () => {
       const { createWorker, PSM } = await import('tesseract.js');
@@ -25,7 +23,6 @@ async function getOcrWorker(): Promise<import('tesseract.js').Worker> {
       });
       return worker;
     })().catch((e) => {
-      workerFailed = true;
       workerPromise = null;
       throw e;
     });
@@ -33,23 +30,62 @@ async function getOcrWorker(): Promise<import('tesseract.js').Worker> {
   return workerPromise;
 }
 
-async function preprocessImage(file: File): Promise<Blob> {
-  const bitmap = await createImageBitmap(file);
+async function canvasFromImageElement(file: File): Promise<HTMLCanvasElement> {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onerror = () => reject(new Error('No se pudo leer la imagen seleccionada'));
+    fr.onload = () => resolve(String(fr.result || ''));
+    fr.readAsDataURL(file);
+  });
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('No se pudo cargar la imagen seleccionada'));
+    image.src = dataUrl;
+  });
   const maxSide = 2200;
-  const scale = Math.min(2, maxSide / Math.max(bitmap.width, bitmap.height, 1));
-  const w = Math.max(1, Math.round(bitmap.width * scale));
-  const h = Math.max(1, Math.round(bitmap.height * scale));
+  const scale = Math.min(2, maxSide / Math.max(img.width, img.height, 1));
+  const w = Math.max(1, Math.round(img.width * scale));
+  const h = Math.max(1, Math.round(img.height * scale));
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext('2d');
-  if (!ctx) {
-    bitmap.close();
-    return file;
-  }
+  if (!ctx) return canvas;
   ctx.filter = 'grayscale(1) contrast(1.35) brightness(1.05)';
-  ctx.drawImage(bitmap, 0, 0, w, h);
-  bitmap.close();
+  ctx.drawImage(img, 0, 0, w, h);
+  return canvas;
+}
+
+async function preprocessImage(file: File): Promise<Blob> {
+  let canvas: HTMLCanvasElement | null = null;
+  if (typeof createImageBitmap === 'function') {
+    try {
+      const bitmap = await createImageBitmap(file);
+      const maxSide = 2200;
+      const scale = Math.min(2, maxSide / Math.max(bitmap.width, bitmap.height, 1));
+      const w = Math.max(1, Math.round(bitmap.width * scale));
+      const h = Math.max(1, Math.round(bitmap.height * scale));
+      canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        bitmap.close();
+        return file;
+      }
+      ctx.filter = 'grayscale(1) contrast(1.35) brightness(1.05)';
+      ctx.drawImage(bitmap, 0, 0, w, h);
+      bitmap.close();
+    } catch {
+      canvas = null;
+    }
+  }
+  if (!canvas) {
+    canvas = await canvasFromImageElement(file);
+  }
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return file;
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
   return blob || file;
 }

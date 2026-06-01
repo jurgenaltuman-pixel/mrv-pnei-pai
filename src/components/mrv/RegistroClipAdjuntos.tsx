@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ImagePlus, Upload, ExternalLink, Loader2, CloudOff, Cloud } from 'lucide-react';
+import { ImagePlus, Upload, ExternalLink, Loader2, CloudOff, Cloud, Camera, Images } from 'lucide-react';
 import { resizeImageFileForUpload } from '@/lib/resize-image-for-upload';
 import { uploadPersonSearchImages } from '@/services/personSearchAttachmentsApi';
 import type { ClipNinoMeta, RegistroClipAdjuntos } from '@/lib/registro-clip-adjuntos';
@@ -41,12 +41,18 @@ export default function RegistroClipAdjuntosSection({
   const [files, setFiles] = useState<(File | null)[]>([null, null]);
   const [uploading, setUploading] = useState(false);
   const [flushing, setFlushing] = useState(false);
-  const fileRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const cameraRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const galleryRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   const docRef = meta.documento.trim();
   const nombreRef = meta.nombre.trim();
   const clipKey = clipStorageKey(meta.tipo, docRef);
-  const puedeSubir = docRef.length >= 4 && nombreRef.length >= 2;
+  const puedeSubir = docRef.length >= 4;
+
+  const openPicker = (index: number, source: 'camera' | 'gallery') => {
+    if (source === 'camera') cameraRefs.current[index]?.click();
+    else galleryRefs.current[index]?.click();
+  };
 
   const pickFile = (index: number, file: File | undefined) => {
     if (!file) return;
@@ -128,7 +134,7 @@ export default function RegistroClipAdjuntosSection({
         enlace_imagen_2: enlace2,
       });
       setFiles([null, null]);
-      fileRefs.current.forEach((el) => {
+      [...cameraRefs.current, ...galleryRefs.current].forEach((el) => {
         if (el) el.value = '';
       });
     } catch (e) {
@@ -255,7 +261,7 @@ export default function RegistroClipAdjuntosSection({
         </div>
       )}
 
-      <p className="text-[11px] text-foreground/90">
+      <p className="text-[10px] text-foreground/90">
         <span className="font-semibold">{nombreRef || '(completá el nombre)'}</span>
         {' · '}
         <span className="font-mono">{meta.tipo} {docRef || '…'}</span>
@@ -273,25 +279,58 @@ export default function RegistroClipAdjuntosSection({
         />
       )}
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
         {[0, 1].map((i) => (
-          <label
-            key={i}
-            className="flex flex-col gap-1 cursor-pointer rounded-lg border bg-background p-2 text-[11px]"
-          >
-            <span className="font-semibold text-muted-foreground">Imagen {i + 1}</span>
+          <div key={i} className="rounded-lg border bg-background p-2 space-y-1.5">
+            <p className="text-[10px] font-semibold text-muted-foreground">Imagen {i + 1}</p>
             <input
               ref={(el) => {
-                fileRefs.current[i] = el;
+                cameraRefs.current[i] = el;
               }}
               type="file"
               accept="image/*"
               capture="environment"
-              className="text-[10px]"
+              className="hidden"
+              aria-label={`Tomar foto ${i + 1}`}
+              title={`Tomar foto ${i + 1}`}
               onChange={(e) => pickFile(i, e.target.files?.[0])}
             />
-            {files[i] && <span className="truncate text-primary">{files[i]!.name}</span>}
-          </label>
+            <input
+              ref={(el) => {
+                galleryRefs.current[i] = el;
+              }}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              aria-label={`Elegir imagen ${i + 1}`}
+              title={`Elegir imagen ${i + 1}`}
+              onChange={(e) => pickFile(i, e.target.files?.[0])}
+            />
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={() => openPicker(i, 'camera')}
+                className="h-8 rounded-md border border-[#0055A4]/35 bg-[#0055A4]/5 text-[11px] font-bold text-[#0055A4] inline-flex items-center justify-center gap-1 active:scale-[0.98]"
+              >
+                <Camera className="w-3.5 h-3.5" />
+                Cámara
+              </button>
+              <button
+                type="button"
+                onClick={() => openPicker(i, 'gallery')}
+                className="h-8 rounded-md border text-[11px] font-semibold inline-flex items-center justify-center gap-1 active:scale-[0.98]"
+              >
+                <Images className="w-3.5 h-3.5" />
+                Galería
+              </button>
+            </div>
+            <input
+              value={files[i]?.name || ''}
+              readOnly
+              className="w-full h-8 px-2 rounded-md border bg-muted/40 text-[10px] text-foreground/80"
+              placeholder="Sin archivo"
+            />
+          </div>
         ))}
       </div>
 
@@ -299,15 +338,14 @@ export default function RegistroClipAdjuntosSection({
         type="button"
         disabled={uploading || flushing || !puedeSubir}
         onClick={() => void subir()}
-        className="h-10 w-full rounded-lg bg-[#0055A4] text-white text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+        className="h-9 w-full rounded-lg bg-[#0055A4] text-white text-[13px] font-bold flex items-center justify-center gap-2 disabled:opacity-50"
       >
         {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
         {isOnline ? 'Subir imágenes a Drive' : 'Guardar imágenes (subir al reconectar)'}
       </button>
       {!puedeSubir && (
         <p className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5">
-          Completá el <strong>nombre</strong> (mín. 2 letras) y el <strong>documento</strong> (mín. 4 caracteres) del niño/a
-          para habilitar la subida.
+          Completá el <strong>documento</strong> (mín. 4 caracteres) del niño/a para habilitar el guardado.
         </p>
       )}
 
