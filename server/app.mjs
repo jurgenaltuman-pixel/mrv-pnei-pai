@@ -27,6 +27,7 @@ import { listRegistrosMerged } from './registrosMerge.mjs';
 import { countRegistrosInSupabase } from './supabaseRegistros.mjs';
 import { fetchBarriosByDistritoFromSupabase } from './supabaseOrg.mjs';
 import { mapExcelRowToRegistro, upsertRegistroRow } from './importRegistrosExcel.mjs';
+import { mergeRoundPayload } from './roundMerge.mjs';
 import { handleAuthSignup } from './authSignup.mjs';
 
 async function loadProfileScope(userId) {
@@ -154,11 +155,11 @@ function countEfectivasInRound(round) {
   return casas.filter((c) => c.guardada && c.estado === 'E').length;
 }
 
+const META_CASAS_EFECTIVAS = 20;
+
 function isRoundPayloadActive(round) {
   if (!round || round.fase === 'start') return false;
-  const eff = countEfectivasInRound(round);
-  const total = Number(round.totalCasas) || 20;
-  return eff < total;
+  return countEfectivasInRound(round) < META_CASAS_EFECTIVAS;
 }
 
 function participantIdsForRound(ownerId, round) {
@@ -1324,7 +1325,7 @@ export function createApp() {
       }
       const roundLocalId = String(round.id);
       const { rows: prev } = await query(
-        `SELECT owner_user_id, participant_user_ids FROM round_monitoring_drafts WHERE round_local_id = $1`,
+        `SELECT owner_user_id, participant_user_ids, payload FROM round_monitoring_drafts WHERE round_local_id = $1`,
         [roundLocalId]
       );
       let ownerId = String(round.userId || req.user.sub);
@@ -1339,10 +1340,17 @@ export function createApp() {
         res.status(403).json({ error: 'Solo el titular puede iniciar la ronda en el servidor.' });
         return;
       }
-      const active = isRoundPayloadActive(round);
-      const participants = participantIdsForRound(ownerId, round);
-      const efectivas = countEfectivasInRound(round);
-      const totalCasas = Number(round.totalCasas) || 20;
+      let payload = round;
+      if (prev.length && prev[0].payload) {
+        const existing =
+          typeof prev[0].payload === 'object' ? prev[0].payload : JSON.parse(String(prev[0].payload));
+        payload = mergeRoundPayload(existing, round);
+      }
+      payload.totalCasas = META_CASAS_EFECTIVAS;
+      const active = isRoundPayloadActive(payload);
+      const participants = participantIdsForRound(ownerId, payload);
+      const efectivas = countEfectivasInRound(payload);
+      const totalCasas = META_CASAS_EFECTIVAS;
 
       if (active) {
         const { rows: existing } = await query(
@@ -1386,13 +1394,13 @@ export function createApp() {
         [
           ownerId,
           roundLocalId,
-          round.codigo || null,
-          String(round.moduloLabel || 'Ronda').trim(),
-          JSON.stringify(round),
+          payload.codigo || null,
+          String(payload.moduloLabel || 'Ronda').trim(),
+          JSON.stringify(payload),
           participants,
           efectivas,
           totalCasas,
-          round.fase || null,
+          payload.fase || null,
           active,
         ]
       );

@@ -1,6 +1,12 @@
 import type { CasaMonitoreo, RoundMonitoring } from '@/types/round-monitoring';
-import { getRoundConfig, MAX_CASAS_POR_MODULO } from '@/lib/round-config';
+import {
+  aplicarMetaFija,
+  CASAS_VISITAS_INICIAL,
+  MAX_CASAS_VISITADAS,
+  metaCasasEfectivas,
+} from '@/lib/round-meta';
 import { ensureRoundCodigo, generarCodigoRonda } from '@/lib/round-codigo';
+import { mergeRoundMonitoring } from '@/lib/round-merge';
 import { isRoundDismissed, isRoundResumable } from '@/lib/round-resume';
 import { isRoundDraftActive, MAX_ACTIVE_ROUNDS_PER_USER } from '@/lib/round-active-limit';
 import { fetchRoundDraftsFromServer } from '@/services/roundDraftApi';
@@ -43,7 +49,7 @@ export function crearCasasVacias(total: number): CasaMonitoreo[] {
 }
 
 export function anadirCasaARonda(round: RoundMonitoring): RoundMonitoring | null {
-  if (round.casas.length >= MAX_CASAS_POR_MODULO) return null;
+  if (round.casas.length >= MAX_CASAS_VISITADAS) return null;
   const nuevoNumero = round.casas.length + 1;
   const nuevaCasa: CasaMonitoreo = {
     numero: nuevoNumero,
@@ -54,15 +60,14 @@ export function anadirCasaARonda(round: RoundMonitoring): RoundMonitoring | null
     longitud: null,
     guardadaAt: null,
   };
-  return {
+  return aplicarMetaFija({
     ...round,
-    totalCasas: nuevoNumero,
     casas: [...round.casas, nuevaCasa],
     casaActiva: nuevoNumero,
     fase: 'croquis',
     completedAt: null,
     ultimaCasaResumen: round.ultimaCasaResumen,
-  };
+  });
 }
 
 export function crearRondaVacia(params: {
@@ -78,15 +83,15 @@ export function crearRondaVacia(params: {
   colaboradores?: string[];
   colaboradorUserIds?: string[];
 }): RoundMonitoring {
-  const total = params.totalCasas ?? getRoundConfig().casasPorModulo;
+  const visitasInicial = params.totalCasas ?? CASAS_VISITAS_INICIAL;
   const now = Date.now();
-  return {
+  return aplicarMetaFija({
     id: crypto.randomUUID(),
     codigo: generarCodigoRonda(),
     userId: params.userId,
     moduloLabel: params.moduloLabel.trim() || 'Módulo',
-    totalCasas: total,
-    casas: crearCasasVacias(total),
+    totalCasas: metaCasasEfectivas(),
+    casas: crearCasasVacias(Math.max(visitasInicial, CASAS_VISITAS_INICIAL)),
     casaActiva: 1,
     fase: 'start',
     createdAt: now,
@@ -101,15 +106,15 @@ export function crearRondaVacia(params: {
     colaboradores: (params.colaboradores || []).map((s) => s.trim()).filter(Boolean),
     colaboradorUserIds: (params.colaboradorUserIds || []).map((s) => String(s).trim()).filter(Boolean),
     ultimaCasaResumen: null,
-  };
+  });
 }
 
 export const roundMonitoringStorage = {
   async save(round: RoundMonitoring): Promise<void> {
     const db = await openDB();
     const tx = db.transaction(ROUNDS_STORE, 'readwrite');
-    round.updatedAt = Date.now();
-    tx.objectStore(ROUNDS_STORE).put(round);
+    const toStore = aplicarMetaFija({ ...round, updatedAt: Date.now() });
+    tx.objectStore(ROUNDS_STORE).put(toStore);
     await new Promise<void>((res, rej) => {
       tx.oncomplete = () => res();
       tx.onerror = () => rej(tx.error);
@@ -142,10 +147,14 @@ export const roundMonitoringStorage = {
     try {
       const remote = await fetchRoundDraftsFromServer();
       for (const r of remote) {
-        const normalized = ensureRoundCodigo({ ...r, userId: r.userId || userId });
+        const normalized = aplicarMetaFija(
+          ensureRoundCodigo({ ...r, userId: r.userId || userId })
+        );
         const local = await this.get(normalized.id);
-        if (!local || normalized.updatedAt >= local.updatedAt) {
+        if (!local) {
           await this.save(normalized);
+        } else {
+          await this.save(mergeRoundMonitoring(aplicarMetaFija(local), normalized));
         }
       }
     } catch (e) {
@@ -153,16 +162,25 @@ export const roundMonitoringStorage = {
     }
   },
 
-  /** Rondas activas visibles para el usuario (propias + equipo), máx. 2 en servidor. */
+  /** Rondas activas visibles para el usuario (titular o colaborador en equipo). */
   async listActiveDraftsForUser(userId: string): Promise<RoundMonitoring[]> {
     await this.syncDraftsFromServer(userId);
     const merged = new Map<string, RoundMonitoring>();
+    const isParticipant = (r: RoundMonitoring) =>
+      String(r.userId) === String(userId) ||
+      (r.colaboradorUserIds || []).some((id) => String(id) === String(userId));
+
     for (const r of await fetchRoundDraftsFromServer()) {
-      merged.set(r.id, ensureRoundCodigo(r));
-    }
-    for (const r of await this.listByUser(userId, 40)) {
+      if (!isParticipant(r)) continue;
+      const remote = aplicarMetaFija(ensureRoundCodigo(r));
       const prev = merged.get(r.id);
-      if (!prev || r.updatedAt > prev.updatedAt) merged.set(r.id, ensureRoundCodigo(r));
+      merged.set(r.id, prev ? mergeRoundMonitoring(prev, remote) : remote);
+    }
+    for (const r of await this.listAll(80)) {
+      if (!isParticipant(r)) continue;
+      const local = aplicarMetaFija(ensureRoundCodigo(r));
+      const prev = merged.get(r.id);
+      merged.set(r.id, prev ? mergeRoundMonitoring(prev, local) : local);
     }
     return [...merged.values()]
       .filter((r) => isRoundDraftActive(r) && !isRoundDismissed(userId, r.id))
@@ -176,7 +194,11 @@ export const roundMonitoringStorage = {
     opts?: { includeDismissed?: boolean }
   ): Promise<RoundMonitoring[]> {
     await this.syncDraftsFromServer(userId);
-    const rows = await this.listByUser(userId, 30);
+    const rows = (await this.listAll(50)).filter(
+      (r) =>
+        String(r.userId) === String(userId) ||
+        (r.colaboradorUserIds || []).some((id) => String(id) === String(userId))
+    );
     return rows.filter(
       (r) => isRoundResumable(r) && (opts?.includeDismissed || !isRoundDismissed(userId, r.id))
     );

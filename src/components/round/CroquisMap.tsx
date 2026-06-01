@@ -6,7 +6,7 @@ import {
   countCasasEfectivas,
   getEstadoConfig,
 } from '@/lib/croquis-housing';
-import { AMPLIAR_VIVIENDAS_LOTES } from '@/lib/round-viviendas';
+import { AMPLIAR_VISITAS_LOTES } from '@/lib/round-viviendas';
 import { ChevronRight, Home, ListChecks, Plus, Undo2 } from 'lucide-react';
 
 interface Props {
@@ -17,7 +17,7 @@ interface Props {
   onReabrirCasa?: (numero: number) => void;
   canEditCasasGuardadas?: boolean;
   puedeAmpliar?: boolean;
-  onAmpliarViviendas?: (cantidad: number) => void;
+  onAmpliarVisitas?: (cantidad: number) => void;
 }
 
 function CroquisMap({
@@ -28,7 +28,7 @@ function CroquisMap({
   onReabrirCasa,
   canEditCasasGuardadas,
   puedeAmpliar,
-  onAmpliarViviendas,
+  onAmpliarVisitas,
 }: Props) {
   const totalVisitadas = casas.length;
   const siguiente = casas.find((c) => !c.guardada);
@@ -36,17 +36,17 @@ function CroquisMap({
   const efectivas = countCasasEfectivas(casas);
 
   const ampliarBlock =
-    puedeAmpliar && onAmpliarViviendas ? (
+    puedeAmpliar && onAmpliarVisitas ? (
       <div className="mt-4 pt-4 border-t border-dashed space-y-2">
         <p className="text-[10px] text-muted-foreground text-left">
-          ¿El barrio tiene más viviendas? Aumentá la meta sin perder lo ya cargado.
+          ¿Hay más viviendas en el barrio? Sumá casillas de visita (la meta sigue en {metaEfectivas} efectivas E).
         </p>
         <div className="flex flex-wrap gap-2 justify-center">
-          {AMPLIAR_VIVIENDAS_LOTES.map((n) => (
+          {AMPLIAR_VISITAS_LOTES.map((n) => (
             <button
               key={n}
               type="button"
-              onClick={() => onAmpliarViviendas(n)}
+              onClick={() => onAmpliarVisitas(n)}
               className="h-10 px-3 rounded-xl border-2 border-primary/40 bg-primary/5 text-primary text-xs font-bold inline-flex items-center gap-1"
             >
               <Plus className="w-4 h-4" />

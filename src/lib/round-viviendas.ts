@@ -1,23 +1,20 @@
 import type { RoundMonitoring } from '@/types/round-monitoring';
-import { MAX_CASAS_POR_MODULO, clampCasasPorModulo } from '@/lib/round-config';
+import { MAX_CASAS_VISITADAS } from '@/lib/round-meta';
 import { anadirCasaARonda } from '@/services/roundMonitoringStorage';
 
-/** Metas de viviendas al iniciar una ronda (casas efectivas E). */
-export const CASAS_META_PRESETS = [20, 50, 80, 120] as const;
+export const AMPLIAR_VISITAS_LOTES = [10, 20] as const;
 
-export const AMPLIAR_VIVIENDAS_LOTES = [10, 20] as const;
-
-export function puedeAmpliarViviendas(round: RoundMonitoring): boolean {
-  return round.casas.length < MAX_CASAS_POR_MODULO;
+export function puedeAmpliarVisitas(round: RoundMonitoring): boolean {
+  return round.casas.length < MAX_CASAS_VISITADAS;
 }
 
-/** Añade casillas vacías y sube la meta E (totalCasas). */
-export function ampliarViviendasRonda(
+/** Solo añade casillas de visita; la meta E sigue en 20. */
+export function ampliarVisitasRonda(
   round: RoundMonitoring,
   cantidad: number
 ): RoundMonitoring | null {
-  if (!puedeAmpliarViviendas(round)) return null;
-  const extra = Math.max(1, Math.min(cantidad, MAX_CASAS_POR_MODULO - round.casas.length));
+  if (!puedeAmpliarVisitas(round)) return null;
+  const extra = Math.max(1, Math.min(cantidad, MAX_CASAS_VISITADAS - round.casas.length));
   let r = round;
   for (let i = 0; i < extra; i += 1) {
     const next = anadirCasaARonda(r);
@@ -34,12 +31,4 @@ export function ampliarViviendasRonda(
     };
   }
   return r;
-}
-
-export function elegirPresetCercano(n: number): number {
-  const c = clampCasasPorModulo(n);
-  const preset = CASAS_META_PRESETS.find((p) => p === c);
-  if (preset) return preset;
-  const menor = [...CASAS_META_PRESETS].reverse().find((p) => p <= c);
-  return menor ?? CASAS_META_PRESETS[0];
 }

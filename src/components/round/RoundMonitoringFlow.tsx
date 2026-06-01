@@ -21,9 +21,15 @@ import {
   evaluateRoundMonitoring,
 } from '@/lib/round-evaluation';
 import { dismissRound, rondaCompletada, rondaIncompleta, undismissRound } from '@/lib/round-resume';
-import { ampliarViviendasRonda, puedeAmpliarViviendas } from '@/lib/round-viviendas';
-import { MAX_CASAS_POR_MODULO } from '@/lib/round-config';
-import { crearRondaVacia, roundMonitoringStorage } from '@/services/roundMonitoringStorage';
+import { ampliarVisitasRonda, puedeAmpliarVisitas } from '@/lib/round-viviendas';
+import { aplicarMetaFija, MAX_CASAS_VISITADAS, metaCasasEfectivas } from '@/lib/round-meta';
+import { mergeRoundMonitoring } from '@/lib/round-merge';
+import { USE_MRV_API } from '@/lib/api-config';
+import {
+  anadirCasaARonda,
+  crearRondaVacia,
+  roundMonitoringStorage,
+} from '@/services/roundMonitoringStorage';
 import { applySyncIdsToCasa, syncCasaActualizada, syncCasaGuardada } from '@/services/roundMonitoringSync';
 import { ensureRoundCodigo } from '@/lib/round-codigo';
 import * as adminApi from '@/services/adminApi';
@@ -32,6 +38,7 @@ import { downloadRoundReportExcel, downloadRoundReportPdf } from '@/lib/export-r
 import { saveRoundHistoryToServer } from '@/services/roundHistoryApi';
 import {
   deleteRoundDraftOnServer,
+  fetchRoundDraftsFromServer,
   syncRoundDraftToServer,
 } from '@/services/roundDraftApi';
 import {
@@ -85,41 +92,6 @@ function equipoToRoundFields(equipo: EquipoMiembro[]) {
   return {
     colaboradores: equipo.map((e) => e.display_name.trim()).filter(Boolean),
     colaboradorUserIds: equipo.map((e) => e.user_id).filter(Boolean),
-  };
-}
-
-function normalizarRondaParaMetaEfectivas(r: RoundMonitoring): RoundMonitoring {
-  if (rondaCompletada(r)) return r;
-  const efectivas = countCasasEfectivas(r.casas);
-  if (efectivas >= r.totalCasas) return r;
-
-  const siguienteSinGuardar = r.casas.find((c) => !c.guardada);
-  if (siguienteSinGuardar) {
-    if (r.fase === 'summary' || r.completedAt != null) {
-      return { ...r, fase: 'croquis', completedAt: null, casaActiva: siguienteSinGuardar.numero };
-    }
-    return r;
-  }
-
-  const nuevaCasaNumero = r.casas.length + 1;
-  return {
-    ...r,
-    totalCasas: Math.max(r.totalCasas, nuevaCasaNumero),
-    casas: [
-      ...r.casas,
-      {
-        numero: nuevaCasaNumero,
-        estado: null,
-        ninos: [],
-        guardada: false,
-        latitud: null,
-        longitud: null,
-        guardadaAt: null,
-      },
-    ],
-    fase: 'croquis',
-    completedAt: null,
-    casaActiva: nuevaCasaNumero,
   };
 }
 
@@ -198,7 +170,7 @@ export default function RoundMonitoringFlow({
       const target = rows.find((r) => r.id === resumeRoundId);
       if (!target || rondaCompletada(target)) return;
       undismissRound(userId, target.id);
-      const r = normalizarRondaParaMetaEfectivas(target);
+      const r = aplicarMetaFija(target);
       setRound(r);
       setBarrio(r.moduloLabel);
       applyEquipoFromRound(r);
@@ -303,7 +275,17 @@ export default function RoundMonitoringFlow({
 
   const persist = useCallback(
     async (r: RoundMonitoring) => {
-      const normalized = ensureRoundCodigo(aplicarUbicacionARonda({ ...r, userId }));
+      let normalized = aplicarMetaFija(
+        ensureRoundCodigo(aplicarUbicacionARonda({ ...r, userId }))
+      );
+      const enEquipo = (normalized.colaboradorUserIds?.length ?? 0) > 0;
+      if (enEquipo && USE_MRV_API) {
+        const drafts = await fetchRoundDraftsFromServer();
+        const remote = drafts.find((d) => d.id === normalized.id);
+        if (remote) {
+          normalized = mergeRoundMonitoring(normalized, aplicarMetaFija(remote));
+        }
+      }
       setRound(normalized);
       await roundMonitoringStorage.save(normalized);
       const syncErr = await syncRoundDraftToServer(normalized);
@@ -315,6 +297,34 @@ export default function RoundMonitoringFlow({
     },
     [userId, aplicarUbicacionARonda, onRoundsChanged, refreshActiveDrafts]
   );
+
+  useEffect(() => {
+    if (!round || round.fase === 'start') return;
+    const enEquipo = (round.colaboradorUserIds?.length ?? 0) > 0;
+    if (!enEquipo || !USE_MRV_API) return;
+    const roundId = round.id;
+    const tick = async () => {
+      await roundMonitoringStorage.syncDraftsFromServer(userId);
+      const merged = await roundMonitoringStorage.get(roundId);
+      if (!merged) return;
+      setRound((prev) => {
+        if (!prev || prev.id !== roundId) return prev;
+        const remoto = aplicarMetaFija(merged);
+        if (remoto.updatedAt <= prev.updatedAt) {
+          const vPrev = prev.casas.filter((c) => c.guardada).length;
+          const vRem = remoto.casas.filter((c) => c.guardada).length;
+          if (vPrev === vRem && countCasasEfectivas(prev.casas) === countCasasEfectivas(remoto.casas)) {
+            return prev;
+          }
+        }
+        return remoto.updatedAt >= prev.updatedAt
+          ? mergeRoundMonitoring(prev, remoto)
+          : mergeRoundMonitoring(remoto, prev);
+      });
+    };
+    const id = window.setInterval(() => void tick(), 12_000);
+    return () => window.clearInterval(id);
+  }, [round?.id, round?.colaboradorUserIds?.length, userId]);
 
   const notifyJornada = useCallback(
     (stats: JornadaStats) => {
@@ -339,7 +349,7 @@ export default function RoundMonitoringFlow({
   const handleContinueRound = () => {
     if (!savedRound || rondaCompletada(savedRound)) return;
     undismissRound(userId, savedRound.id);
-    const r = normalizarRondaParaMetaEfectivas(savedRound);
+    const r = aplicarMetaFija(savedRound);
     setRound(r);
     setBarrio(r.moduloLabel);
     applyEquipoFromRound(r);
@@ -371,7 +381,7 @@ export default function RoundMonitoringFlow({
     toast({ title: 'Ronda descartada' });
   };
 
-  const handleStart = async (totalCasasMeta: number) => {
+  const handleStart = async () => {
     if (!canStart) {
       toast({
         title: 'Elegí el barrio',
@@ -412,7 +422,6 @@ export default function RoundMonitoringFlow({
     const r = crearRondaVacia({
       userId,
       moduloLabel: nombre,
-      totalCasas: totalCasasMeta,
       region: location.regionNombre || 'Sin región',
       distrito: location.distritoNombre || 'Sin distrito',
       servicio: location.servicioNombre || null,
@@ -426,7 +435,10 @@ export default function RoundMonitoringFlow({
     setRondaRegistrada(false);
     await persist(r);
     notifyJornada(setRondaActivaNombre(userId, nombre));
-    toast({ title: 'Ronda iniciada', description: `${r.totalCasas} casas · ${nombre}` });
+    toast({
+      title: 'Ronda iniciada',
+      description: `Meta ${metaCasasEfectivas()} efectivas (E) · ${nombre}`,
+    });
   };
 
   const goToCasa = async (numero: number, opts?: { reedit?: boolean }) => {
@@ -599,35 +611,19 @@ export default function RoundMonitoringFlow({
     const registrosDelta = estadoDraft === 'E' ? Math.max(1, updatedCasa.ninos.length) : 1;
     notifyJornada(acumularJornada(userId, deltaContadorPorEstadoCasa(estadoDraft), registrosDelta));
 
-    const metaEfectivas = round.totalCasas;
+    const metaEfectivas = metaCasasEfectivas();
     const efectivas = countCasasEfectivas(casas);
     const metaCumplida = efectivas >= metaEfectivas;
+    let draftRound: RoundMonitoring = { ...roundActualizado, casas };
     const nextCasa = casas.find((c) => !c.guardada);
-    const visitedAllCurrent = !nextCasa;
-    const nuevaCasaNum = casas.length + 1;
-    const casasFinales =
-      !metaCumplida && visitedAllCurrent
-        ? [
-            ...casas,
-            {
-              numero: nuevaCasaNum,
-              estado: null,
-              ninos: [],
-              guardada: false,
-              latitud: null,
-              longitud: null,
-              guardadaAt: null,
-            },
-          ]
-        : casas;
-    const totalCasasActualizado =
-      !metaCumplida && visitedAllCurrent
-        ? Math.max(round.totalCasas, nuevaCasaNum)
-        : round.totalCasas;
+    if (!metaCumplida && !nextCasa) {
+      const ampliada = anadirCasaARonda(draftRound);
+      if (ampliada) draftRound = ampliada;
+    }
+    const casasFinales = draftRound.casas;
     const siguienteCasa = casasFinales.find((c) => !c.guardada);
     await persist({
-      ...roundActualizado,
-      totalCasas: totalCasasActualizado,
+      ...draftRound,
       casas: casasFinales,
       ultimaCasaResumen: { numero: updatedCasa.numero, estado: estadoDraft, ninos: updatedCasa.ninos.length },
       fase: metaCumplida ? 'summary' : 'croquis',
@@ -649,21 +645,21 @@ export default function RoundMonitoringFlow({
     void persist({ ...round, casaActiva: numero, fase: 'edit-casa' });
   };
 
-  const handleAmpliarViviendas = async (cantidad: number) => {
+  const handleAmpliarVisitas = async (cantidad: number) => {
     if (!round) return;
-    const next = ampliarViviendasRonda(round, cantidad);
+    const next = ampliarVisitasRonda(round, cantidad);
     if (!next) {
       toast({
-        title: 'Límite de viviendas',
-        description: `Máximo ${MAX_CASAS_POR_MODULO} por ronda.`,
+        title: 'Límite de visitas',
+        description: `Máximo ${MAX_CASAS_VISITADAS} visitas por ronda.`,
         variant: 'destructive',
       });
       return;
     }
     await persist(next);
     toast({
-      title: 'Viviendas añadidas',
-      description: `Meta: ${next.totalCasas} casas efectivas (E). Continuá el monitoreo.`,
+      title: 'Visitas añadidas',
+      description: `${next.casas.length} casillas · meta ${metaCasasEfectivas()} efectivas (E).`,
     });
   };
 
@@ -813,7 +809,7 @@ export default function RoundMonitoringFlow({
               return next;
             });
           }}
-          onStart={(totalCasas) => void handleStart(totalCasas)}
+          onStart={() => void handleStart()}
           canStart={canStart}
           loadingResume={loadingResume}
           savedRound={savedRound}
@@ -985,8 +981,8 @@ export default function RoundMonitoringFlow({
           canEditCasasGuardadas
           onEditCasaGuardada={openEditCasaGuardada}
           onReabrirCasa={(n) => void reabrirCasaGuardada(n)}
-          puedeAmpliar={puedeAmpliarViviendas(round)}
-          onAmpliarViviendas={(n) => void handleAmpliarViviendas(n)}
+          puedeAmpliar={puedeAmpliarVisitas(round)}
+          onAmpliarVisitas={(n) => void handleAmpliarVisitas(n)}
         />
       </div>
     );
