@@ -6,7 +6,7 @@ const DEFAULT_CASAS = 20;
 const DEFAULT_ADMIN_PASS = 'mrvadmin';
 
 /** Máximo de viviendas/casas por módulo (ronda + ampliaciones). */
-export const MAX_CASAS_POR_MODULO = 100;
+export const MAX_CASAS_POR_MODULO = 200;
 export const MIN_CASAS_POR_MODULO = 4;
 
 export function clampCasasPorModulo(n: number): number {

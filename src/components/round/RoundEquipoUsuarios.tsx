@@ -83,10 +83,10 @@ export default function RoundEquipoUsuarios({
         <div className="px-3 pb-3 pt-0 border-t border-border/60 space-y-2">
           <p className="text-[10px] text-muted-foreground leading-snug">
             Vos sos el entrevistador principal
-            {entrevistadorNombre ? ` (${entrevistadorNombre})` : ''}. Sumá compañeros con la misma
-            asignación ({region} · {distrito}
-            {servicio ? ` · ${servicio}` : ''}) para completar la ronda juntos; el avance se guarda en la
-            nube (hasta 2 rondas activas por usuario).
+            {entrevistadorNombre ? ` (${entrevistadorNombre})` : ''}. Sumá compañeros de la lista: verán la
+            misma ronda en su celular con los mismos datos y nombres del equipo. Asignación: {region}
+            {distrito ? ` · ${distrito}` : ''}
+            {servicio ? ` · ${servicio}` : ''}. Máx. 2 rondas activas por persona.
           </p>
           {loading && (
             <p className="text-[10px] text-muted-foreground animate-pulse">Cargando equipo…</p>

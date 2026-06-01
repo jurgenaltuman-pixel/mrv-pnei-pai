@@ -1632,7 +1632,7 @@ export default function AdminPanel({ isSuperAdmin = false, isAdmin = false }: { 
           <p className="text-xs text-muted-foreground">
             Cantidad de viviendas en el mapa tipo butacas. Los brigadistas registran niños por casa (sin evaluación CVS ni fechas de dosis).
           </p>
-          <label className="field-label">Casas por módulo (default 20)</label>
+          <label className="field-label">Casas por módulo — valor por defecto al iniciar (máx. {MAX_CASAS_POR_MODULO})</label>
           <input
             type="number"
             min={4}

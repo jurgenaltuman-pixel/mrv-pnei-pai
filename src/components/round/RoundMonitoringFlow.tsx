@@ -21,6 +21,8 @@ import {
   evaluateRoundMonitoring,
 } from '@/lib/round-evaluation';
 import { dismissRound, rondaCompletada, rondaIncompleta, undismissRound } from '@/lib/round-resume';
+import { ampliarViviendasRonda, puedeAmpliarViviendas } from '@/lib/round-viviendas';
+import { MAX_CASAS_POR_MODULO } from '@/lib/round-config';
 import { crearRondaVacia, roundMonitoringStorage } from '@/services/roundMonitoringStorage';
 import { applySyncIdsToCasa, syncCasaActualizada, syncCasaGuardada } from '@/services/roundMonitoringSync';
 import { ensureRoundCodigo } from '@/lib/round-codigo';
@@ -102,6 +104,7 @@ function normalizarRondaParaMetaEfectivas(r: RoundMonitoring): RoundMonitoring {
   const nuevaCasaNumero = r.casas.length + 1;
   return {
     ...r,
+    totalCasas: Math.max(r.totalCasas, nuevaCasaNumero),
     casas: [
       ...r.casas,
       {
@@ -368,7 +371,7 @@ export default function RoundMonitoringFlow({
     toast({ title: 'Ronda descartada' });
   };
 
-  const handleStart = async () => {
+  const handleStart = async (totalCasasMeta: number) => {
     if (!canStart) {
       toast({
         title: 'Elegí el barrio',
@@ -409,6 +412,7 @@ export default function RoundMonitoringFlow({
     const r = crearRondaVacia({
       userId,
       moduloLabel: nombre,
+      totalCasas: totalCasasMeta,
       region: location.regionNombre || 'Sin región',
       distrito: location.distritoNombre || 'Sin distrito',
       servicio: location.servicioNombre || null,
@@ -600,12 +604,13 @@ export default function RoundMonitoringFlow({
     const metaCumplida = efectivas >= metaEfectivas;
     const nextCasa = casas.find((c) => !c.guardada);
     const visitedAllCurrent = !nextCasa;
+    const nuevaCasaNum = casas.length + 1;
     const casasFinales =
       !metaCumplida && visitedAllCurrent
         ? [
             ...casas,
             {
-              numero: casas.length + 1,
+              numero: nuevaCasaNum,
               estado: null,
               ninos: [],
               guardada: false,
@@ -615,9 +620,14 @@ export default function RoundMonitoringFlow({
             },
           ]
         : casas;
+    const totalCasasActualizado =
+      !metaCumplida && visitedAllCurrent
+        ? Math.max(round.totalCasas, nuevaCasaNum)
+        : round.totalCasas;
     const siguienteCasa = casasFinales.find((c) => !c.guardada);
     await persist({
       ...roundActualizado,
+      totalCasas: totalCasasActualizado,
       casas: casasFinales,
       ultimaCasaResumen: { numero: updatedCasa.numero, estado: estadoDraft, ninos: updatedCasa.ninos.length },
       fase: metaCumplida ? 'summary' : 'croquis',
@@ -637,6 +647,24 @@ export default function RoundMonitoringFlow({
     const casa = round.casas.find((c) => c.numero === numero && c.guardada);
     if (!casa?.estado) return;
     void persist({ ...round, casaActiva: numero, fase: 'edit-casa' });
+  };
+
+  const handleAmpliarViviendas = async (cantidad: number) => {
+    if (!round) return;
+    const next = ampliarViviendasRonda(round, cantidad);
+    if (!next) {
+      toast({
+        title: 'Límite de viviendas',
+        description: `Máximo ${MAX_CASAS_POR_MODULO} por ronda.`,
+        variant: 'destructive',
+      });
+      return;
+    }
+    await persist(next);
+    toast({
+      title: 'Viviendas añadidas',
+      description: `Meta: ${next.totalCasas} casas efectivas (E). Continuá el monitoreo.`,
+    });
   };
 
   const reabrirCasaGuardada = async (numero: number) => {
@@ -785,7 +813,7 @@ export default function RoundMonitoringFlow({
               return next;
             });
           }}
-          onStart={() => void handleStart()}
+          onStart={(totalCasas) => void handleStart(totalCasas)}
           canStart={canStart}
           loadingResume={loadingResume}
           savedRound={savedRound}
@@ -957,6 +985,8 @@ export default function RoundMonitoringFlow({
           canEditCasasGuardadas
           onEditCasaGuardada={openEditCasaGuardada}
           onReabrirCasa={(n) => void reabrirCasaGuardada(n)}
+          puedeAmpliar={puedeAmpliarViviendas(round)}
+          onAmpliarViviendas={(n) => void handleAmpliarViviendas(n)}
         />
       </div>
     );

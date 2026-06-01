@@ -6,7 +6,8 @@ import {
   countCasasEfectivas,
   getEstadoConfig,
 } from '@/lib/croquis-housing';
-import { ChevronRight, Home, ListChecks, Undo2 } from 'lucide-react';
+import { AMPLIAR_VIVIENDAS_LOTES } from '@/lib/round-viviendas';
+import { ChevronRight, Home, ListChecks, Plus, Undo2 } from 'lucide-react';
 
 interface Props {
   casas: CasaMonitoreo[];
@@ -15,6 +16,8 @@ interface Props {
   onEditCasaGuardada?: (numero: number) => void;
   onReabrirCasa?: (numero: number) => void;
   canEditCasasGuardadas?: boolean;
+  puedeAmpliar?: boolean;
+  onAmpliarViviendas?: (cantidad: number) => void;
 }
 
 function CroquisMap({
@@ -24,20 +27,47 @@ function CroquisMap({
   onEditCasaGuardada,
   onReabrirCasa,
   canEditCasasGuardadas,
+  puedeAmpliar,
+  onAmpliarViviendas,
 }: Props) {
   const totalVisitadas = casas.length;
   const siguiente = casas.find((c) => !c.guardada);
   const visitadas = casas.filter((c) => c.guardada).length;
   const efectivas = countCasasEfectivas(casas);
 
+  const ampliarBlock =
+    puedeAmpliar && onAmpliarViviendas ? (
+      <div className="mt-4 pt-4 border-t border-dashed space-y-2">
+        <p className="text-[10px] text-muted-foreground text-left">
+          ¿El barrio tiene más viviendas? Aumentá la meta sin perder lo ya cargado.
+        </p>
+        <div className="flex flex-wrap gap-2 justify-center">
+          {AMPLIAR_VIVIENDAS_LOTES.map((n) => (
+            <button
+              key={n}
+              type="button"
+              onClick={() => onAmpliarViviendas(n)}
+              className="h-10 px-3 rounded-xl border-2 border-primary/40 bg-primary/5 text-primary text-xs font-bold inline-flex items-center gap-1"
+            >
+              <Plus className="w-4 h-4" />
+              +{n} viviendas
+            </button>
+          ))}
+        </div>
+      </div>
+    ) : null;
+
   if (!siguiente) {
     return (
       <div className="mrv-panel text-center p-6">
-        <p className="font-bold text-lg">Módulo completo</p>
+        <p className="font-bold text-lg">
+          {efectivas >= metaEfectivas ? 'Meta de efectivas alcanzada' : 'Todas las casillas visitadas'}
+        </p>
         <p className="text-sm text-muted-foreground mt-1">
-          <span className="text-success font-bold">{efectivas} efectivas (E)</span>
+          <span className="text-success font-bold">{efectivas}</span> / {metaEfectivas} efectivas (E)
           {visitadas > efectivas ? ` · ${visitadas - efectivas} visitas N/F/R` : ''}
         </p>
+        {ampliarBlock}
       </div>
     );
   }
@@ -160,6 +190,8 @@ function CroquisMap({
           </div>
         </div>
       )}
+
+      {ampliarBlock}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] mt-5 pt-4 border-t">
         {CROQUIS_ESTADOS.map((e) => (

@@ -1,4 +1,5 @@
-import { getRoundConfig } from '@/lib/round-config';
+import { clampCasasPorModulo, getRoundConfig, MAX_CASAS_POR_MODULO } from '@/lib/round-config';
+import { CASAS_META_PRESETS, elegirPresetCercano } from '@/lib/round-viviendas';
 import { upperText } from '@/lib/text-uppercase';
 import type { RoundMonitoring } from '@/types/round-monitoring';
 import { formatRoundCodigoDisplay } from '@/lib/round-codigo';
@@ -19,7 +20,7 @@ interface Props {
   onToggleEquipo: (miembro: EquipoMiembro) => void;
   maxActiveRounds: number;
   activeDrafts?: RoundMonitoring[];
-  onStart: () => void;
+  onStart: (totalCasas: number) => void;
   canStart: boolean;
   loadingResume?: boolean;
   savedRound?: RoundMonitoring | null;
@@ -51,6 +52,8 @@ export default function RoundStartScreen({
   onDiscardSavedRound,
 }: Props) {
   const cfg = getRoundConfig();
+  const [metaCasas, setMetaCasas] = useState(() => elegirPresetCercano(cfg.casasPorModulo));
+  const [metaCustom, setMetaCustom] = useState(false);
   const [manualBarrio, setManualBarrio] = useState(false);
   const barriosOrdenados = useMemo(
     () => [...barriosDisponibles].sort((a, b) => a.localeCompare(b, 'es')),
@@ -166,7 +169,7 @@ export default function RoundStartScreen({
         <div>
           <h2 className="text-xl font-black text-foreground leading-tight">Inicio de ronda</h2>
           <p className="text-sm text-muted-foreground">
-            {cfg.casasPorModulo} casas efectivas (E) · hasta {maxActiveRounds} rondas activas
+            Meta de casas efectivas (E) · hasta {maxActiveRounds} rondas activas
           </p>
         </div>
       </div>
@@ -235,7 +238,59 @@ export default function RoundStartScreen({
           autoFocus={sinCatalogo}
         />
       )}
-      {!mostrarManual && !sinCatalogo && <div className="mb-5" />}
+      {!mostrarManual && !sinCatalogo && <div className="mb-3" />}
+
+      {!savedRound && (
+        <div className="mb-4 rounded-xl border border-primary/20 bg-primary/5 p-3 space-y-2">
+          <p className="text-xs font-bold text-primary">Viviendas en esta ronda (meta E)</p>
+          <p className="text-[10px] text-muted-foreground leading-snug">
+            Elegí cuántas casas efectivas necesitás. Si el barrio es grande, usá 120. Podés sumar más durante el
+            monitoreo.
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {CASAS_META_PRESETS.map((n) => (
+              <button
+                key={n}
+                type="button"
+                onClick={() => {
+                  setMetaCustom(false);
+                  setMetaCasas(n);
+                }}
+                className={`h-9 min-w-[3rem] px-3 rounded-lg text-sm font-bold border ${
+                  !metaCustom && metaCasas === n
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'bg-background text-foreground border-border'
+                }`}
+              >
+                {n}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => setMetaCustom(true)}
+              className={`h-9 px-3 rounded-lg text-sm font-bold border ${
+                metaCustom ? 'bg-primary text-primary-foreground border-primary' : 'bg-background border-border'
+              }`}
+            >
+              Otra
+            </button>
+          </div>
+          {metaCustom && (
+            <input
+              type="number"
+              min={4}
+              max={MAX_CASAS_POR_MODULO}
+              value={metaCasas}
+              onChange={(e) => setMetaCasas(clampCasasPorModulo(Number(e.target.value) || 20))}
+              className="w-full h-10 px-3 rounded-lg border bg-background text-sm font-mono"
+              inputMode="numeric"
+            />
+          )}
+          <p className="text-[10px] font-semibold text-foreground">
+            Meta seleccionada: <span className="text-success">{metaCasas}</span> casas efectivas (E)
+          </p>
+        </div>
+      )}
 
       {canStart && barrio.trim() && !savedRound && activeDrafts.length >= maxActiveRounds && (
         <p className="mb-3 text-xs text-destructive font-medium text-center">
@@ -247,7 +302,7 @@ export default function RoundStartScreen({
         <div className="mb-4 rounded-xl border border-dashed border-muted-foreground/40 px-3 py-2 text-center">
           <p className="text-[10px] text-muted-foreground">
             Ronda: <span className="font-bold text-foreground">{barrio.trim()}</span> ·{' '}
-            <span className="font-bold text-success">0</span> / {cfg.casasPorModulo} efectivas (E)
+            <span className="font-bold text-success">0</span> / {metaCasas} efectivas (E)
             {colaboradores.length > 0 && (
               <>
                 {' '}
@@ -259,7 +314,7 @@ export default function RoundStartScreen({
       )}
       <button
         type="button"
-        onClick={onStart}
+        onClick={() => onStart(metaCasas)}
         disabled={!canStart || (!savedRound && activeDrafts.length >= maxActiveRounds)}
         className="mrv-btn-primary text-lg"
       >
