@@ -1,6 +1,6 @@
 import type { RoundMonitoring } from '@/types/round-monitoring';
 import { MAX_CASAS_VISITADAS } from '@/lib/round-meta';
-import { anadirCasaARonda } from '@/services/roundMonitoringStorage';
+import { anadirCasaARonda } from '@/lib/round-casas';
 
 export const AMPLIAR_VISITAS_LOTES = [10, 20] as const;
 

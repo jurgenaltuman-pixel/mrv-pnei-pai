@@ -147,13 +147,6 @@ export default function MainApp() {
   const [pendingDriveCount, setPendingDriveCount] = useState(0);
   const [syncingOffline, setSyncingOffline] = useState(false);
   const [resumeRoundId, setResumeRoundId] = useState<string | null>(null);
-
-  const handleResumeRound = useCallback((r: RoundMonitoring) => {
-    setResumeRoundId(r.id);
-    setTab('registro');
-    setBarrio(r.moduloLabel);
-    setRoundsDockKey((k) => k + 1);
-  }, [setBarrio]);
   const [roundsDockKey, setRoundsDockKey] = useState(0);
   const [activeRoundId, setActiveRoundId] = useState<string | null>(null);
   const [padronBgPct, setPadronBgPct] = useState<number | null>(null);
@@ -245,6 +238,14 @@ export default function MainApp() {
   const [servicioId, setServicioId] = useState<number | null>(null);
   const [servicioManual, setServicioManual] = useState('');
   const [barrio, setBarrio] = useState('');
+
+  const handleResumeRound = useCallback((r: RoundMonitoring) => {
+    setResumeRoundId(r.id);
+    setTab('registro');
+    setBarrio(r.moduloLabel);
+    setRoundsDockKey((k) => k + 1);
+  }, []);
+
   const [responsable, setResponsable] = useState(upperTextOptional(user?.nombre));
   const [mapsLink, setMapsLink] = useState('');
   const [mapsResolvedLink, setMapsResolvedLink] = useState('');
