@@ -158,18 +158,21 @@ export async function syncAllPendingDriveImages(): Promise<{
   uploaded: number;
   failed: number;
   remaining: number;
+  lastError?: string;
 }> {
   const items = await getAllPendingDrive();
   let uploaded = 0;
   let failed = 0;
+  let lastError: string | undefined;
   for (const item of items) {
     try {
       await uploadQueuedDriveItem(item.id);
       uploaded += 1;
-    } catch {
+    } catch (e) {
       failed += 1;
+      lastError = e instanceof Error ? e.message : String(e);
     }
   }
   const remaining = await getPendingDriveCount();
-  return { uploaded, failed, remaining };
+  return { uploaded, failed, remaining, lastError };
 }

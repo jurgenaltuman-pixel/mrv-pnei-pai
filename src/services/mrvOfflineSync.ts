@@ -28,7 +28,10 @@ export interface OfflineSyncResult {
   driveUploaded: number;
   driveFailed: number;
   driveRemaining: number;
+  totalPending: number;
   allSynced: boolean;
+  /** true solo si no hay red (no confundir con fallo de Drive estando online). */
+  offline: boolean;
 }
 
 function mapRegistro(item: PendingRegistro) {
@@ -61,6 +64,7 @@ export async function syncAllOfflineData(isOnline: boolean): Promise<OfflineSync
     const status = await getOfflineSyncStatus();
     return {
       ok: false,
+      offline: true,
       message: 'Sin conexión. Conectate a internet para subir los datos pendientes.',
       registrosSynced: 0,
       registrosFailed: 0,
@@ -68,6 +72,7 @@ export async function syncAllOfflineData(isOnline: boolean): Promise<OfflineSync
       driveUploaded: 0,
       driveFailed: 0,
       driveRemaining: status.pendingDriveImages,
+      totalPending: status.totalPending,
       allSynced: false,
     };
   }
@@ -76,6 +81,7 @@ export async function syncAllOfflineData(isOnline: boolean): Promise<OfflineSync
   if (before.allSynced) {
     return {
       ok: true,
+      offline: false,
       message: 'Todo sincronizado. No hay datos pendientes en el dispositivo.',
       registrosSynced: 0,
       registrosFailed: 0,
@@ -83,6 +89,7 @@ export async function syncAllOfflineData(isOnline: boolean): Promise<OfflineSync
       driveUploaded: 0,
       driveFailed: 0,
       driveRemaining: 0,
+      totalPending: 0,
       allSynced: true,
     };
   }
@@ -108,9 +115,15 @@ export async function syncAllOfflineData(isOnline: boolean): Promise<OfflineSync
   } else {
     message = `No se pudo subir todo. Quedan ${remaining} pendiente(s). Verificá la conexión e intentá de nuevo.`;
   }
+  if (driveResult.lastError && driveResult.failed > 0) {
+    message += ` (${driveResult.lastError})`;
+  }
+
+  const hadProgress = regResult.synced > 0 || driveResult.uploaded > 0;
 
   return {
-    ok: after.allSynced,
+    ok: after.allSynced || hadProgress,
+    offline: false,
     message,
     registrosSynced: regResult.synced,
     registrosFailed: regResult.failed,
@@ -118,6 +131,7 @@ export async function syncAllOfflineData(isOnline: boolean): Promise<OfflineSync
     driveUploaded: driveResult.uploaded,
     driveFailed: driveResult.failed,
     driveRemaining: after.pendingDriveImages,
+    totalPending: remaining,
     allSynced: after.allSynced,
   };
 }

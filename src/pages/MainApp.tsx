@@ -175,10 +175,17 @@ export default function MainApp() {
           r.registrosSynced > 0 ||
           r.driveUploaded > 0;
         if (shouldToast) {
+          const syncTitle = r.allSynced
+            ? 'Todo sincronizado'
+            : r.offline
+              ? 'Sin conexión'
+              : !r.allSynced && (r.driveFailed > 0 || r.registrosFailed > 0)
+                ? 'Sincronización incompleta'
+                : 'Sincronización';
           toast({
-            title: r.allSynced ? 'Todo sincronizado' : r.ok ? 'Sincronización' : 'Sin conexión',
+            title: syncTitle,
             description: r.message,
-            variant: r.allSynced ? 'default' : !r.ok ? 'destructive' : 'default',
+            variant: r.allSynced ? 'default' : r.offline || !r.allSynced ? 'destructive' : 'default',
           });
         }
         await refreshPending();
