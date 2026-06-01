@@ -1,7 +1,7 @@
 {
   "name": "vite_react_shadcn_ts",
   "private": true,
-  "version": "2.6.17",
+  "version": "2.6.18",
   "description": "M R V — PNEI y PAI — MSPBS · registro nominal en terreno (soporte offline)",
   "author": "MSPBS — PNEI / PAI",
   "type": "module",
@@ -78,7 +78,8 @@
     "supabase:clear-padron": "node scripts/clear-supabase-padron.mjs",
     "supabase:import-org": "node scripts/import-org-supabase.mjs",
     "functions:prepare": "node scripts/prepare-firebase-functions.mjs",
-    "deploy:firebase": "npm run build && npm run functions:prepare && cd functions && npm install && cd .. && firebase deploy --only hosting,functions"
+    "deploy:firebase": "npm run build && npm run functions:prepare && cd functions && npm install && cd .. && firebase deploy --only hosting,functions",
+    "deploy:hosting": "node scripts/deploy-hosting.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.1",

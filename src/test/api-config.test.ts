@@ -25,4 +25,13 @@ describe('resolveMrvApiBaseUrl', () => {
     vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0' });
     expect(resolveMrvApiBaseUrl()).toBe('');
   });
+
+  it('ignora localhost:8787 en Firebase aunque el build traiga .env.local', () => {
+    vi.stubEnv('VITE_MRV_API_URL', 'http://localhost:8787');
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0' });
+    vi.stubGlobal('window', {
+      location: { hostname: 'mrvpai.web.app', protocol: 'https:' },
+    });
+    expect(resolveMrvApiBaseUrl()).toBe(MRV_API_PRODUCTION_DEFAULT);
+  });
 });

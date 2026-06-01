@@ -28,32 +28,55 @@ import { isNativeApp } from '@/lib/capacitor-platform';
 /** Producción por defecto (Firebase PWA, APK, builds sin .env). */
 export const MRV_API_PRODUCTION_DEFAULT = 'https://rapid-vaccinator-main.vercel.app';
 
+function isLocalDevApiUrl(url: string): boolean {
+  return /localhost|127\.0\.0\.1/.test(url);
+}
+
+function pageIsLocalhost(): boolean {
+  if (typeof window === 'undefined') return false;
+  const host = window.location.hostname.toLowerCase();
+  return host === 'localhost' || host === '127.0.0.1';
+}
+
 /**
  * Resuelve la base de la API MRV.
- * - VITE_MRV_API_URL en build si existe.
+ * - Nunca usa localhost:8787 en Firebase/Vercel (build local con .env.local contaminado).
  * - App nativa (Capacitor): siempre API en Vercel (el WebView usa https://localhost).
- * - Vercel / localhost web: mismo origen (vacío → /api).
- * - Firebase Hosting y otros estáticos: API en Vercel.
+ * - Vercel web: mismo origen (vacío → /api).
+ * - Firebase Hosting: API en Vercel.
  */
 export function resolveMrvApiBaseUrl(): string {
   const fromEnv = String(import.meta.env.VITE_MRV_API_URL ?? '').trim().replace(/\/$/, '');
-  if (fromEnv) return fromEnv;
 
   if (typeof window !== 'undefined') {
     if (isNativeApp()) {
       return MRV_API_PRODUCTION_DEFAULT;
     }
+
     const host = window.location.hostname.toLowerCase();
-    if (host === 'localhost' || host === '127.0.0.1' || host.endsWith('.vercel.app')) {
+
+    if (!pageIsLocalhost() && fromEnv && isLocalDevApiUrl(fromEnv)) {
+      return MRV_API_PRODUCTION_DEFAULT;
+    }
+
+    if (host.endsWith('.vercel.app')) {
       return '';
     }
     if (host.endsWith('.web.app') || host.endsWith('.firebaseapp.com')) {
       return MRV_API_PRODUCTION_DEFAULT;
     }
+    if (pageIsLocalhost()) {
+      if (fromEnv) return fromEnv;
+      return '';
+    }
+
+    if (fromEnv && !isLocalDevApiUrl(fromEnv)) return fromEnv;
     return MRV_API_PRODUCTION_DEFAULT;
   }
 
-  return MRV_API_PRODUCTION_DEFAULT;
+  if (fromEnv && !isLocalDevApiUrl(fromEnv)) return fromEnv;
+  if (import.meta.env.PROD) return MRV_API_PRODUCTION_DEFAULT;
+  return fromEnv || '';
 }
 
 /** Base URL vacía = mismo origen (/api en Vercel o proxy dev). */
